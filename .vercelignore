@@ -1,0 +1,13 @@
+# Source fixtures and local evidence must never enter deployment bundles.
+data/
+coverage/
+playwright-report/
+test-results/
+performance/artifacts/
+performance/evidence/
+tests/load/
+
+# Local platform and database state.
+.vercel/
+supabase/.branches/
+supabase/.temp/

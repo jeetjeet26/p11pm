@@ -1,0 +1,191 @@
+name: Nightly Soak
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+    inputs:
+      candidate_commit:
+        description: Optional full staging commit SHA (defaults to workflow SHA)
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-soak
+  cancel-in-progress: false
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      CANDIDATE_COMMIT: ${{ inputs.candidate_commit || github.sha }}
+      K6_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+      K6_PROFILE: soak
+    steps:
+      - id: preflight
+        name: Check soak configuration
+        env:
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          SESSION_FILE_B64: ${{ secrets.K6_SESSION_FILE_B64 }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [[ ! "$CANDIDATE_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Nightly soak skipped; candidate_commit must be a full lowercase SHA."
+          elif [ -z "$K6_BASE_URL" ] || [ -z "$SESSION_FILE_B64" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Nightly soak skipped; STAGING_BASE_URL or K6_SESSION_FILE_B64 is unavailable."
+          elif [[ ! "$K6_BASE_URL" =~ ^https://[a-zA-Z0-9.-]+$ ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Nightly soak skipped; STAGING_BASE_URL must be an HTTPS origin."
+          elif [ -z "$BYPASS_SECRET" ] || [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Nightly soak skipped; Vercel verification or bypass secrets are unavailable."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.preflight.outputs.run == 'true'
+        with:
+          ref: ${{ inputs.candidate_commit || github.sha }}
+
+      - uses: actions/setup-node@v4
+        if: steps.preflight.outputs.run == 'true'
+        with:
+          node-version: 20
+          cache: npm
+
+      - id: install
+        name: Install locked dependencies
+        if: steps.preflight.outputs.run == 'true'
+        run: npm ci
+
+      - id: deployment
+        name: Verify staging deployment commit
+        if: steps.preflight.outputs.run == 'true'
+        env:
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          mkdir -p test-results
+          npx --no-install vercel inspect "$K6_BASE_URL" \
+            --json > test-results/vercel-inspect.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployment = JSON.parse(fs.readFileSync("test-results/vercel-inspect.json", "utf8"));
+          const commitCandidates = [];
+          const projectCandidates = [];
+          const visit = (value, parent = "") => {
+            if (!value || typeof value !== "object") return;
+            for (const [key, child] of Object.entries(value)) {
+              const path = parent ? `${parent}.${key}` : key;
+              if (
+                typeof child === "string" &&
+                /^[a-f0-9]{40}$/i.test(child) &&
+                /(?:commit|git).*sha|sha.*(?:commit|git)/i.test(path)
+              ) commitCandidates.push(child.toLowerCase());
+              if (
+                typeof child === "string" &&
+                /project.*id|id.*project/i.test(path)
+              ) projectCandidates.push(child);
+              if (typeof child === "object") visit(child, path);
+            }
+          };
+          visit(deployment);
+          if (!commitCandidates.includes(process.env.CANDIDATE_COMMIT)) {
+            throw new Error("Staging deployment does not map to CANDIDATE_COMMIT.");
+          }
+          if (!projectCandidates.includes(process.env.VERCEL_PROJECT_ID)) {
+            throw new Error("Staging deployment does not belong to VERCEL_PROJECT_ID.");
+          }
+          const state = deployment.readyState || deployment.state || deployment.status;
+          if (state && !["READY", "ready"].includes(state)) {
+            throw new Error(`Staging deployment is not ready: ${state}`);
+          }
+          if (!deployment.id) throw new Error("Staging deployment ID is unavailable.");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `id=${deployment.id}\n`);
+          NODE
+          npx --no-install vercel curl "$K6_BASE_URL/login" \
+            --protection-bypass "$BYPASS_SECRET" \
+            --yes \
+            -- --silent --show-error --fail --location --output /dev/null
+
+      - id: k6
+        uses: grafana/setup-k6-action@v1
+        if: steps.deployment.outcome == 'success'
+
+      - id: sessions
+        name: Prepare runtime-only sessions
+        if: steps.deployment.outcome == 'success'
+        env:
+          SESSION_FILE_B64: ${{ secrets.K6_SESSION_FILE_B64 }}
+        run: |
+          mkdir -p test-results
+          printf '%s' "$SESSION_FILE_B64" | base64 --decode > test-results/k6-sessions.json
+
+      - id: soak
+        name: Run one-hour soak
+        if: steps.deployment.outcome == 'success'
+        env:
+          K6_SESSION_FILE: test-results/k6-sessions.json
+          K6_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: k6 run --summary-export k6-summary.json tests/load/workspace.js
+
+      - name: Generate soak evidence
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+          DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
+          K6_OUTCOME: ${{ steps.k6.outcome }}
+          SESSION_OUTCOME: ${{ steps.sessions.outcome }}
+          SOAK_OUTCOME: ${{ steps.soak.outcome }}
+        run: |
+          case "$DEPLOYMENT_OUTCOME" in
+            success) deployment_status=pass ;;
+            *) deployment_status=fail ;;
+          esac
+          if [ "$K6_OUTCOME" = success ] &&
+            [ "$SESSION_OUTCOME" = success ] &&
+            [ "$SOAK_OUTCOME" = success ]; then
+            soak_status=pass
+          else
+            soak_status=fail
+          fi
+          artifact=()
+          if [ -f k6-summary.json ]; then
+            artifact=(--artifact k6-summary=k6-summary.json)
+          fi
+          deployment_args=(--deployment-url "$K6_BASE_URL")
+          if [ -n "$DEPLOYMENT_ID" ]; then
+            deployment_args+=(--deployment-id "$DEPLOYMENT_ID")
+          fi
+          npm run evidence:release -- \
+            --environment staging \
+            --output release-evidence.json \
+            "${deployment_args[@]}" \
+            --require-clean \
+            --check "deployment-commit=$deployment_status" \
+            --check "nightly-soak=$soak_status" \
+            "${artifact[@]}"
+
+      - name: Upload soak evidence
+        if: always() && steps.preflight.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-soak-${{ env.CANDIDATE_COMMIT }}-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            k6-summary.json
+            release-evidence.json
+            performance/contract.json
+            performance/schemas/v1/release-evidence.schema.json

@@ -1,0 +1,551 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://p11.pm/schemas/performance-contract.v1.json",
+  "title": "P11 PM performance contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "schemaVersion",
+    "contractVersion",
+    "name",
+    "status",
+    "effectiveDate",
+    "targets",
+    "regressionPolicy",
+    "budgets",
+    "loadScenarios",
+    "regionPolicy"
+  ],
+  "properties": {
+    "$schema": {
+      "const": "./schemas/v1/performance-contract.schema.json"
+    },
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "contractVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "active",
+        "retired"
+      ]
+    },
+    "effectiveDate": {
+      "type": "string",
+      "format": "date"
+    },
+    "targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "nominalConcurrentUsers",
+        "burstConcurrentUsers",
+        "growthActiveUsers",
+        "growthProjects",
+        "growthTodos",
+        "growthMessages",
+        "growthActivityRows"
+      ],
+      "properties": {
+        "nominalConcurrentUsers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "burstConcurrentUsers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "growthActiveUsers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "growthProjects": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "growthTodos": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "growthMessages": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "growthActivityRows": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "regressionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxUnexplainedPercent",
+        "dimensions"
+      ],
+      "properties": {
+        "maxUnexplainedPercent": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "dimensions": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "budgets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "webVitals",
+        "authenticatedPages",
+        "pageData",
+        "clientJavascript",
+        "mutations",
+        "chat",
+        "infrastructure",
+        "files",
+        "accelo",
+        "release"
+      ],
+      "properties": {
+        "webVitals": {
+          "$ref": "#/$defs/webVitalsBudget"
+        },
+        "authenticatedPages": {
+          "$ref": "#/$defs/authenticatedPagesBudget"
+        },
+        "pageData": {
+          "$ref": "#/$defs/pageDataBudget"
+        },
+        "clientJavascript": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "compression",
+            "routes"
+          ],
+          "properties": {
+            "compression": {
+              "const": "brotli"
+            },
+            "routes": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/routeBudget"
+              }
+            }
+          }
+        },
+        "mutations": {
+          "$ref": "#/$defs/mutationsBudget"
+        },
+        "chat": {
+          "$ref": "#/$defs/chatBudget"
+        },
+        "infrastructure": {
+          "$ref": "#/$defs/infrastructureBudget"
+        },
+        "files": {
+          "$ref": "#/$defs/filesBudget"
+        },
+        "accelo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "requiredWhenEnabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "requiredWhenEnabled": {
+              "$ref": "#/$defs/acceloBudget"
+            }
+          }
+        },
+        "release": {
+          "$ref": "#/$defs/releaseBudget"
+        }
+      }
+    },
+    "loadScenarios": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/loadScenario"
+      }
+    },
+    "regionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pinnedRegion",
+        "decision"
+      ],
+      "properties": {
+        "pinnedRegion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "decision": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "positiveNumber": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "routeList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^/"
+      }
+    },
+    "webVitalsBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "lcpMs",
+        "inpMs",
+        "cls",
+        "fcpMs"
+      ],
+      "properties": {
+        "scope": {
+          "const": "mobile_p75_by_route_family"
+        },
+        "lcpMs": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "inpMs": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "cls": {
+          "$ref": "#/$defs/rate"
+        },
+        "fcpMs": {
+          "$ref": "#/$defs/positiveNumber"
+        }
+      }
+    },
+    "authenticatedPagesBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "routes",
+        "ttfbP95Ms",
+        "ttfbP99Ms",
+        "maxFiveXxRate"
+      ],
+      "properties": {
+        "routes": {
+          "$ref": "#/$defs/routeList"
+        },
+        "ttfbP95Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "ttfbP99Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "maxFiveXxRate": {
+          "$ref": "#/$defs/rate"
+        }
+      }
+    },
+    "pageDataBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxDatabaseOrApiCalls",
+        "maxRowsToRowsUsedRatio",
+        "compressedRscKiB"
+      ],
+      "properties": {
+        "maxDatabaseOrApiCalls": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "maxRowsToRowsUsedRatio": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "compressedRscKiB": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dashboard",
+            "project",
+            "team"
+          ],
+          "properties": {
+            "dashboard": {
+              "$ref": "#/$defs/positiveNumber"
+            },
+            "project": {
+              "$ref": "#/$defs/positiveNumber"
+            },
+            "team": {
+              "$ref": "#/$defs/positiveNumber"
+            }
+          }
+        }
+      }
+    },
+    "mutationsBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acknowledgementP95Ms",
+        "acknowledgementP99Ms",
+        "idempotencyRequired"
+      ],
+      "properties": {
+        "acknowledgementP95Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "acknowledgementP99Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "idempotencyRequired": {
+          "const": true
+        }
+      }
+    },
+    "chatBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messagePageRpcP95Ms",
+        "summaryRpcP95Ms",
+        "commitToVisibleP95Ms",
+        "commitToVisibleP99Ms",
+        "reconnectCatchUpP99Ms",
+        "maxApplicationRequestsPerMessage",
+        "zeroDropsDuplicatesOrUnauthorizedChannels"
+      ],
+      "properties": {
+        "messagePageRpcP95Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "summaryRpcP95Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "commitToVisibleP95Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "commitToVisibleP99Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "reconnectCatchUpP99Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "maxApplicationRequestsPerMessage": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "zeroDropsDuplicatesOrUnauthorizedChannels": {
+          "const": true
+        }
+      }
+    },
+    "infrastructureBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxDatabaseUtilization",
+        "maxRealtimeQuotaUtilization",
+        "realtimeLagP99Ms",
+        "minimumBurstHeadroom"
+      ],
+      "properties": {
+        "maxDatabaseUtilization": {
+          "$ref": "#/$defs/rate"
+        },
+        "maxRealtimeQuotaUtilization": {
+          "$ref": "#/$defs/rate"
+        },
+        "realtimeLagP99Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "minimumBurstHeadroom": {
+          "$ref": "#/$defs/rate"
+        }
+      }
+    },
+    "filesBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "concurrentUploads",
+        "maxUploadMiB",
+        "minimumSuccessRate",
+        "pendingReclaimHours",
+        "firstViewportPreviewMiB"
+      ],
+      "properties": {
+        "concurrentUploads": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "maxUploadMiB": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "minimumSuccessRate": {
+          "$ref": "#/$defs/rate"
+        },
+        "pendingReclaimHours": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "firstViewportPreviewMiB": {
+          "$ref": "#/$defs/positiveNumber"
+        }
+      }
+    },
+    "acceloBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "minimumSuccessRate",
+        "runP99Ms",
+        "maxOverlap",
+        "oldestPendingMinutes",
+        "consecutiveSuccessfulRuns"
+      ],
+      "properties": {
+        "minimumSuccessRate": {
+          "$ref": "#/$defs/rate"
+        },
+        "runP99Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "maxOverlap": {
+          "$ref": "#/$defs/nonNegativeInteger"
+        },
+        "oldestPendingMinutes": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "consecutiveSuccessfulRuns": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "releaseBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cleanCommitRequired",
+        "immutableEvidenceRequired",
+        "comparablePassingStagingRuns",
+        "fieldReviewDays"
+      ],
+      "properties": {
+        "cleanCommitRequired": {
+          "const": true
+        },
+        "immutableEvidenceRequired": {
+          "const": true
+        },
+        "comparablePassingStagingRuns": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "fieldReviewDays": {
+          "$ref": "#/$defs/positiveInteger"
+        }
+      }
+    },
+    "routeBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "route",
+        "nextRouteKey",
+        "maxKiB"
+      ],
+      "properties": {
+        "route": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "nextRouteKey": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "maxKiB": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "loadScenario": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "virtualUsers",
+        "durationSeconds",
+        "description"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+        },
+        "virtualUsers": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "durationSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxPageDataStatements": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

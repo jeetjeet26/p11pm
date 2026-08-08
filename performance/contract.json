@@ -1,0 +1,203 @@
+{
+  "$schema": "./schemas/v1/performance-contract.schema.json",
+  "schemaVersion": "1.0.0",
+  "contractVersion": "1.0.0",
+  "name": "P11 PM production performance contract",
+  "status": "active",
+  "effectiveDate": "2026-08-08",
+  "targets": {
+    "nominalConcurrentUsers": 33,
+    "burstConcurrentUsers": 66,
+    "growthActiveUsers": 330,
+    "growthProjects": 300,
+    "growthTodos": 25000,
+    "growthMessages": 1000000,
+    "growthActivityRows": 1000000
+  },
+  "regressionPolicy": {
+    "maxUnexplainedPercent": 10,
+    "dimensions": [
+      "p75_latency",
+      "p95_latency",
+      "response_bytes",
+      "request_count",
+      "query_count",
+      "client_javascript"
+    ]
+  },
+  "budgets": {
+    "webVitals": {
+      "scope": "mobile_p75_by_route_family",
+      "lcpMs": 2500,
+      "inpMs": 200,
+      "cls": 0.1,
+      "fcpMs": 1800
+    },
+    "authenticatedPages": {
+      "routes": [
+        "/dashboard",
+        "/projects",
+        "/projects/[projectId]",
+        "/team",
+        "/chat/[conversationId]"
+      ],
+      "ttfbP95Ms": 800,
+      "ttfbP99Ms": 1500,
+      "maxFiveXxRate": 0.001
+    },
+    "pageData": {
+      "maxDatabaseOrApiCalls": 5,
+      "maxRowsToRowsUsedRatio": 2,
+      "compressedRscKiB": {
+        "dashboard": 150,
+        "project": 250,
+        "team": 250
+      }
+    },
+    "clientJavascript": {
+      "compression": "brotli",
+      "routes": [
+        {
+          "route": "/dashboard",
+          "nextRouteKey": "/(workspace)/dashboard/page",
+          "maxKiB": 160
+        },
+        {
+          "route": "/login",
+          "nextRouteKey": "/login/page",
+          "maxKiB": 160
+        },
+        {
+          "route": "/projects",
+          "nextRouteKey": "/(workspace)/projects/page",
+          "maxKiB": 200
+        },
+        {
+          "route": "/projects/[projectId]",
+          "nextRouteKey": "/(workspace)/projects/[projectId]/page",
+          "maxKiB": 200
+        },
+        {
+          "route": "/chat/[conversationId]",
+          "nextRouteKey": "/(workspace)/chat/[[...conversationId]]/page",
+          "maxKiB": 200
+        },
+        {
+          "route": "/team",
+          "nextRouteKey": "/(workspace)/team/page",
+          "maxKiB": 200
+        }
+      ]
+    },
+    "mutations": {
+      "acknowledgementP95Ms": 500,
+      "acknowledgementP99Ms": 1000,
+      "idempotencyRequired": true
+    },
+    "chat": {
+      "messagePageRpcP95Ms": 50,
+      "summaryRpcP95Ms": 100,
+      "commitToVisibleP95Ms": 750,
+      "commitToVisibleP99Ms": 2000,
+      "reconnectCatchUpP99Ms": 5000,
+      "maxApplicationRequestsPerMessage": 5,
+      "zeroDropsDuplicatesOrUnauthorizedChannels": true
+    },
+    "infrastructure": {
+      "maxDatabaseUtilization": 0.7,
+      "maxRealtimeQuotaUtilization": 0.5,
+      "realtimeLagP99Ms": 1000,
+      "minimumBurstHeadroom": 0.3
+    },
+    "files": {
+      "concurrentUploads": 10,
+      "maxUploadMiB": 25,
+      "minimumSuccessRate": 0.995,
+      "pendingReclaimHours": 24,
+      "firstViewportPreviewMiB": 5
+    },
+    "accelo": {
+      "enabled": false,
+      "requiredWhenEnabled": {
+        "minimumSuccessRate": 0.999,
+        "runP99Ms": 240000,
+        "maxOverlap": 0,
+        "oldestPendingMinutes": 30,
+        "consecutiveSuccessfulRuns": 96
+      }
+    },
+    "release": {
+      "cleanCommitRequired": true,
+      "immutableEvidenceRequired": true,
+      "comparablePassingStagingRuns": 3,
+      "fieldReviewDays": 7
+    }
+  },
+  "loadScenarios": [
+    {
+      "id": "cold-start-storm",
+      "virtualUsers": 33,
+      "durationSeconds": 60,
+      "maxPageDataStatements": 165,
+      "description": "Thirty-three authenticated users open the dashboard simultaneously."
+    },
+    {
+      "id": "navigation-burst",
+      "virtualUsers": 33,
+      "durationSeconds": 60,
+      "description": "Dashboard to projects to project to team to chat."
+    },
+    {
+      "id": "normal-work-soak",
+      "virtualUsers": 33,
+      "durationSeconds": 3600,
+      "description": "Seventy percent reads, fifteen percent task edits, ten percent comments or chat, and five percent files."
+    },
+    {
+      "id": "chat-hot-channel",
+      "virtualUsers": 33,
+      "durationSeconds": 3600,
+      "description": "One message per second, with a five-minute three-message-per-second burst."
+    },
+    {
+      "id": "headroom-burst",
+      "virtualUsers": 66,
+      "durationSeconds": 300,
+      "description": "Burst certification with at least thirty percent infrastructure headroom."
+    },
+    {
+      "id": "full-source-volume",
+      "virtualUsers": 33,
+      "durationSeconds": 300,
+      "description": "2,483 to-dos, 113 profiles, 30 projects, and complete relationships."
+    },
+    {
+      "id": "growth-volume",
+      "virtualUsers": 330,
+      "durationSeconds": 300,
+      "description": "330 users, 300 projects, 25k to-dos, 1M messages, and 1M activity rows."
+    },
+    {
+      "id": "file-pressure",
+      "virtualUsers": 10,
+      "durationSeconds": 300,
+      "description": "Ten concurrent 25 MiB uploads plus ordinary traffic."
+    },
+    {
+      "id": "race-and-retry",
+      "virtualUsers": 20,
+      "durationSeconds": 300,
+      "description": "Concurrent edits, repeated sends, integration retries, and overlapping trigger attempts."
+    },
+    {
+      "id": "failure-recovery",
+      "virtualUsers": 33,
+      "durationSeconds": 300,
+      "description": "Realtime disconnects, failed metadata writes, integration timeouts, and client retries."
+    }
+  ],
+  "regionPolicy": {
+    "pinnedRegion": null,
+    "decision": "Benchmark pdx1 and sfo1 against Supabase us-west-2 and record the lower-p95 result before pinning."
+  }
+}

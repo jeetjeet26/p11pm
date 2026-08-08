@@ -1,0 +1,208 @@
+name: Staging Performance
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_commit:
+        description: Full commit SHA deployed to staging
+        required: true
+        type: string
+      profile:
+        description: Load profile
+        required: true
+        default: target
+        type: choice
+        options:
+          - smoke
+          - target
+          - navigation
+          - burst
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-performance
+  cancel-in-progress: false
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      K6_BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+      K6_PROFILE: ${{ inputs.profile || 'target' }}
+    steps:
+      - id: preflight
+        name: Check staging configuration
+        env:
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          SESSION_FILE_B64: ${{ secrets.K6_SESSION_FILE_B64 }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [[ ! "$CANDIDATE_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Staging performance skipped; candidate_commit must be a full lowercase SHA."
+          elif [ -z "$K6_BASE_URL" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Staging performance skipped; STAGING_BASE_URL is unavailable."
+          elif [[ ! "$K6_BASE_URL" =~ ^https://[a-zA-Z0-9.-]+$ ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Staging performance skipped; STAGING_BASE_URL must be an HTTPS origin."
+          elif [ "$K6_PROFILE" != smoke ] && [ -z "$SESSION_FILE_B64" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Authenticated load skipped; K6_SESSION_FILE_B64 is unavailable."
+          elif [ -z "$BYPASS_SECRET" ] || [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Staging performance skipped; Vercel verification or bypass secrets are unavailable."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.preflight.outputs.run == 'true'
+        with:
+          ref: ${{ inputs.candidate_commit }}
+
+      - uses: actions/setup-node@v4
+        if: steps.preflight.outputs.run == 'true'
+        with:
+          node-version: 20
+          cache: npm
+
+      - id: install
+        name: Install locked dependencies
+        if: steps.preflight.outputs.run == 'true'
+        run: npm ci
+
+      - id: deployment
+        name: Verify staging deployment commit
+        if: steps.preflight.outputs.run == 'true'
+        env:
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          EXPECTED_COMMIT: ${{ inputs.candidate_commit }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          mkdir -p test-results
+          npx --no-install vercel inspect "$K6_BASE_URL" \
+            --json > test-results/vercel-inspect.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployment = JSON.parse(fs.readFileSync("test-results/vercel-inspect.json", "utf8"));
+          const commitCandidates = [];
+          const projectCandidates = [];
+          const visit = (value, parent = "") => {
+            if (!value || typeof value !== "object") return;
+            for (const [key, child] of Object.entries(value)) {
+              const path = parent ? `${parent}.${key}` : key;
+              if (
+                typeof child === "string" &&
+                /^[a-f0-9]{40}$/i.test(child) &&
+                /(?:commit|git).*sha|sha.*(?:commit|git)/i.test(path)
+              ) commitCandidates.push(child.toLowerCase());
+              if (
+                typeof child === "string" &&
+                /project.*id|id.*project/i.test(path)
+              ) projectCandidates.push(child);
+              if (typeof child === "object") visit(child, path);
+            }
+          };
+          visit(deployment);
+          if (!commitCandidates.includes(process.env.EXPECTED_COMMIT)) {
+            throw new Error("Staging deployment does not map to the workflow commit.");
+          }
+          if (!projectCandidates.includes(process.env.VERCEL_PROJECT_ID)) {
+            throw new Error("Staging deployment does not belong to VERCEL_PROJECT_ID.");
+          }
+          const state = deployment.readyState || deployment.state || deployment.status;
+          if (state && !["READY", "ready"].includes(state)) {
+            throw new Error(`Staging deployment is not ready: ${state}`);
+          }
+          if (!deployment.id) throw new Error("Staging deployment ID is unavailable.");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `id=${deployment.id}\n`);
+          NODE
+          npx --no-install vercel curl "$K6_BASE_URL/login" \
+            --protection-bypass "$BYPASS_SECRET" \
+            --yes \
+            -- --silent --show-error --fail --location --output /dev/null
+
+      - id: k6
+        uses: grafana/setup-k6-action@v1
+        if: steps.deployment.outcome == 'success'
+
+      - id: sessions
+        name: Prepare runtime-only sessions
+        if: steps.deployment.outcome == 'success' && env.K6_PROFILE != 'smoke'
+        env:
+          SESSION_FILE_B64: ${{ secrets.K6_SESSION_FILE_B64 }}
+        run: |
+          mkdir -p test-results
+          printf '%s' "$SESSION_FILE_B64" | base64 --decode > test-results/k6-sessions.json
+
+      - id: load
+        name: Run contract load profile
+        if: steps.deployment.outcome == 'success'
+        env:
+          K6_SESSION_FILE: ${{ env.K6_PROFILE != 'smoke' && 'test-results/k6-sessions.json' || '' }}
+          K6_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          if [ "$K6_PROFILE" = smoke ]; then
+            k6 run --summary-export k6-summary.json tests/load/smoke.js
+          else
+            k6 run --summary-export k6-summary.json tests/load/workspace.js
+          fi
+
+      - name: Generate staging evidence
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        env:
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+          DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
+          K6_OUTCOME: ${{ steps.k6.outcome }}
+          LOAD_OUTCOME: ${{ steps.load.outcome }}
+          SESSION_OUTCOME: ${{ steps.sessions.outcome }}
+        run: |
+          case "$DEPLOYMENT_OUTCOME" in
+            success) deployment_status=pass ;;
+            *) deployment_status=fail ;;
+          esac
+          if [ "$K6_OUTCOME" = success ] &&
+            [ "$LOAD_OUTCOME" = success ] &&
+            { [ "$K6_PROFILE" = smoke ] || [ "$SESSION_OUTCOME" = success ]; }; then
+            load_status=pass
+          else
+            load_status=fail
+          fi
+          artifact=()
+          if [ -f k6-summary.json ]; then
+            artifact=(--artifact k6-summary=k6-summary.json)
+          fi
+          deployment_args=(--deployment-url "$K6_BASE_URL")
+          if [ -n "$DEPLOYMENT_ID" ]; then
+            deployment_args+=(--deployment-id "$DEPLOYMENT_ID")
+          fi
+          npm run evidence:release -- \
+            --environment staging \
+            --output release-evidence.json \
+            "${deployment_args[@]}" \
+            --require-clean \
+            --check "deployment-commit=$deployment_status" \
+            --check "load-$K6_PROFILE=$load_status" \
+            "${artifact[@]}"
+
+      - name: Upload staging evidence
+        if: always() && steps.preflight.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-performance-${{ inputs.candidate_commit }}-${{ env.K6_PROFILE }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            k6-summary.json
+            release-evidence.json
+            performance/contract.json
+            performance/schemas/v1/release-evidence.schema.json

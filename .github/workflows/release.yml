@@ -1,0 +1,591 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_commit:
+        description: Full commit SHA used by the preview and staging evidence
+        required: true
+        type: string
+      preview_url:
+        description: Already-tested preview deployment origin
+        required: true
+        type: string
+      rollback_target:
+        description: Known-good deployment URL or ID
+        required: true
+        type: string
+      staging_run_1:
+        description: First passing staging-performance workflow run ID
+        required: true
+        type: string
+      staging_run_2:
+        description: Second passing staging-performance workflow run ID
+        required: true
+        type: string
+      staging_run_3:
+        description: Third passing staging-performance workflow run ID
+        required: true
+        type: string
+      burst_run:
+        description: Passing 66-user burst workflow run ID
+        required: true
+        type: string
+      soak_run:
+        description: Passing nightly one-hour soak workflow run ID
+        required: true
+        type: string
+      confirm_promotion:
+        description: Promote this exact preview after all gates pass
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      ready: ${{ steps.preflight.outputs.run }}
+    env:
+      PLAYWRIGHT_BASE_URL: ${{ inputs.preview_url }}
+    steps:
+      - id: preflight
+        name: Check release configuration
+        env:
+          AUTH_STATE_B64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_B64 }}
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          BURST_RUN: ${{ inputs.burst_run }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PREVIEW_URL: ${{ inputs.preview_url }}
+          ROLLBACK_TARGET: ${{ inputs.rollback_target }}
+          RUN_1: ${{ inputs.staging_run_1 }}
+          RUN_2: ${{ inputs.staging_run_2 }}
+          RUN_3: ${{ inputs.staging_run_3 }}
+          SOAK_RUN: ${{ inputs.soak_run }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [[ ! "$CANDIDATE_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release skipped; candidate_commit must be a full lowercase SHA."
+          elif [[ ! "$PREVIEW_URL" =~ ^https://[a-zA-Z0-9.-]+$ ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release skipped; preview_url must be an HTTPS origin."
+          elif [[ ! "$ROLLBACK_TARGET" =~ ^https://[a-zA-Z0-9.-]+$ && ! "$ROLLBACK_TARGET" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release skipped; rollback_target must be a deployment URL or ID."
+          elif [[ ! "$RUN_1" =~ ^[0-9]+$ || ! "$RUN_2" =~ ^[0-9]+$ || ! "$RUN_3" =~ ^[0-9]+$ || ! "$BURST_RUN" =~ ^[0-9]+$ || ! "$SOAK_RUN" =~ ^[0-9]+$ ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release skipped; staging run IDs must be numeric."
+          elif [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ] || [ -z "$BYPASS_SECRET" ] || [ -z "$AUTH_STATE_B64" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release skipped; Vercel or Playwright release secrets are unavailable."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.preflight.outputs.run == 'true'
+        with:
+          ref: ${{ inputs.candidate_commit }}
+
+      - uses: actions/setup-node@v4
+        if: steps.preflight.outputs.run == 'true'
+        with:
+          node-version: 20
+          cache: npm
+
+      - id: install
+        name: Install locked dependencies
+        if: steps.preflight.outputs.run == 'true'
+        run: npm ci
+
+      - id: source
+        name: Verify immutable source
+        if: steps.preflight.outputs.run == 'true'
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_COMMIT"
+
+      - id: deployment
+        name: Verify preview deployment commit
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PREVIEW_URL: ${{ inputs.preview_url }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          mkdir -p test-results
+          npx --no-install vercel inspect "$PREVIEW_URL" \
+            --json > test-results/vercel-inspect.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployment = JSON.parse(fs.readFileSync("test-results/vercel-inspect.json", "utf8"));
+          const commitCandidates = [];
+          const projectCandidates = [];
+          const visit = (value, parent = "") => {
+            if (!value || typeof value !== "object") return;
+            for (const [key, child] of Object.entries(value)) {
+              const path = parent ? `${parent}.${key}` : key;
+              if (
+                typeof child === "string" &&
+                /^[a-f0-9]{40}$/i.test(child) &&
+                /(?:commit|git).*sha|sha.*(?:commit|git)/i.test(path)
+              ) {
+                commitCandidates.push(child.toLowerCase());
+              }
+              if (
+                typeof child === "string" &&
+                /project.*id|id.*project/i.test(path)
+              ) projectCandidates.push(child);
+              if (typeof child === "object") visit(child, path);
+            }
+          };
+          visit(deployment);
+          if (!commitCandidates.includes(process.env.CANDIDATE_COMMIT)) {
+            throw new Error("Preview deployment does not map to candidate_commit.");
+          }
+          if (!projectCandidates.includes(process.env.VERCEL_PROJECT_ID)) {
+            throw new Error("Preview deployment does not belong to VERCEL_PROJECT_ID.");
+          }
+          const state = deployment.readyState || deployment.state || deployment.status;
+          if (state && !["READY", "ready"].includes(state)) {
+            throw new Error(`Preview deployment is not ready: ${state}`);
+          }
+          if (!deployment.id) throw new Error("Preview deployment ID is unavailable.");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `id=${deployment.id}\n`);
+          NODE
+
+      - id: rollback
+        name: Verify rollback target
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        env:
+          ROLLBACK_TARGET: ${{ inputs.rollback_target }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx --no-install vercel inspect "$ROLLBACK_TARGET" \
+            --json > test-results/vercel-rollback-inspect.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployment = JSON.parse(
+            fs.readFileSync("test-results/vercel-rollback-inspect.json", "utf8"),
+          );
+          const projectCandidates = [];
+          const visit = (value, parent = "") => {
+            if (!value || typeof value !== "object") return;
+            for (const [key, child] of Object.entries(value)) {
+              const path = parent ? `${parent}.${key}` : key;
+              if (
+                typeof child === "string" &&
+                /project.*id|id.*project/i.test(path)
+              ) projectCandidates.push(child);
+              if (typeof child === "object") visit(child, path);
+            }
+          };
+          visit(deployment);
+          if (!projectCandidates.includes(process.env.VERCEL_PROJECT_ID)) {
+            throw new Error("Rollback deployment does not belong to VERCEL_PROJECT_ID.");
+          }
+          const state = deployment.readyState || deployment.state || deployment.status;
+          if (state && !["READY", "ready"].includes(state)) {
+            throw new Error(`Rollback deployment is not ready: ${state}`);
+          }
+          if (!deployment.id) throw new Error("Rollback deployment ID is unavailable.");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `id=${deployment.id}\n`);
+          NODE
+
+      - name: Download staging evidence one
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          pattern: staging-performance-*
+          path: test-results/staging-evidence/run-1
+          run-id: ${{ inputs.staging_run_1 }}
+
+      - name: Download staging evidence two
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          pattern: staging-performance-*
+          path: test-results/staging-evidence/run-2
+          run-id: ${{ inputs.staging_run_2 }}
+
+      - name: Download staging evidence three
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          pattern: staging-performance-*
+          path: test-results/staging-evidence/run-3
+          run-id: ${{ inputs.staging_run_3 }}
+
+      - name: Download burst evidence
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          pattern: staging-performance-*
+          path: test-results/staging-evidence/run-burst
+          run-id: ${{ inputs.burst_run }}
+
+      - name: Download soak evidence
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          pattern: nightly-soak-*
+          path: test-results/staging-evidence/run-soak
+          run-id: ${{ inputs.soak_run }}
+
+      - id: staging
+        name: Verify staging, burst, and soak evidence
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        env:
+          BURST_RUN: ${{ inputs.burst_run }}
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          RUN_1: ${{ inputs.staging_run_1 }}
+          RUN_2: ${{ inputs.staging_run_2 }}
+          RUN_3: ${{ inputs.staging_run_3 }}
+          SOAK_RUN: ${{ inputs.soak_run }}
+        run: |
+          node <<'NODE'
+          const { createHash } = require("node:crypto");
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const root = "test-results/staging-evidence";
+          const contractRaw = fs.readFileSync("performance/contract.json");
+          const contract = JSON.parse(contractRaw);
+          const contractSha256 = createHash("sha256").update(contractRaw).digest("hex");
+          const requiredRuns = [
+            { runId: process.env.RUN_1, folder: "run-1", role: "target-1", check: "load-target" },
+            { runId: process.env.RUN_2, folder: "run-2", role: "target-2", check: "load-target" },
+            { runId: process.env.RUN_3, folder: "run-3", role: "target-3", check: "load-target" },
+            { runId: process.env.BURST_RUN, folder: "run-burst", role: "burst", check: "load-burst" },
+            { runId: process.env.SOAK_RUN, folder: "run-soak", role: "soak", check: "nightly-soak" },
+          ];
+          if (new Set(requiredRuns.map(({ runId }) => runId)).size !== requiredRuns.length) {
+            throw new Error("Distinct workflow runs are required for all release gates.");
+          }
+          const walk = (directory) => fs.readdirSync(directory, { withFileTypes: true })
+            .flatMap((entry) => {
+              const target = path.join(directory, entry.name);
+              return entry.isDirectory() ? walk(target) : [target];
+            });
+          const index = requiredRuns.map(({ runId, folder, role, check }) => {
+            const files = walk(path.join(root, folder))
+              .filter((file) => path.basename(file) === "release-evidence.json");
+            if (files.length !== 1) throw new Error(`Run ${runId} must contain one release-evidence.json.`);
+            const raw = fs.readFileSync(files[0]);
+            const evidence = JSON.parse(raw);
+            const requiredCheck = evidence.checks.find((item) => item.name === check);
+            if (
+              evidence.environment !== "staging" ||
+              evidence.overallStatus !== "pass" ||
+              evidence.source.commit !== process.env.CANDIDATE_COMMIT ||
+              evidence.contract.version !== contract.contractVersion ||
+              evidence.contract.sha256 !== contractSha256 ||
+              requiredCheck?.status !== "pass"
+            ) {
+              throw new Error(`Run ${runId} is not passing ${check} evidence for the candidate.`);
+            }
+            return {
+              runId,
+              role,
+              evidenceId: evidence.evidenceId,
+              contractVersion: evidence.contract.version,
+              contractSha256: evidence.contract.sha256,
+              profile: requiredCheck.name,
+              sha256: createHash("sha256").update(raw).digest("hex"),
+            };
+          });
+          if (new Set(index.map((item) => item.contractVersion)).size !== 1) {
+            throw new Error("Release evidence uses different contract versions.");
+          }
+          fs.writeFileSync(
+            "test-results/staging-evidence-index.json",
+            `${JSON.stringify({ schemaVersion: "1.0.0", runs: index }, null, 2)}\n`,
+          );
+          NODE
+
+      - id: access
+        name: Check preview accessibility
+        if: >-
+          always() && steps.preflight.outputs.run == 'true' &&
+          steps.install.outcome == 'success' &&
+          steps.deployment.outcome == 'success'
+        env:
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx --no-install vercel curl "$PLAYWRIGHT_BASE_URL/login" \
+            --protection-bypass "$BYPASS_SECRET" \
+            --yes \
+            -- --silent --show-error --fail --location --output /dev/null
+
+      - id: audit
+        name: Audit production dependencies
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        run: npm audit --omit=dev
+
+      - id: cli
+        name: Verify pinned CLIs
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        run: |
+          npx --no-install supabase --version
+          npx --no-install vercel --version
+
+      - id: lint
+        name: Lint
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        run: npm run lint
+
+      - id: typecheck
+        name: Typecheck
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        run: npm run typecheck
+
+      - id: unit
+        name: Unit tests
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        run: npm run test:unit
+
+      - id: build
+        name: Production build
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        run: npm run build
+
+      - id: budgets
+        name: Route bundle budgets
+        if: always() && steps.preflight.outputs.run == 'true' && steps.build.outcome == 'success'
+        run: npm run check:route-budgets
+
+      - id: browser
+        name: Install Chromium
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        run: npx --no-install playwright install --with-deps chromium
+
+      - id: auth
+        name: Prepare authenticated browser state
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        env:
+          AUTH_STATE_B64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_B64 }}
+        run: |
+          mkdir -p test-results
+          printf '%s' "$AUTH_STATE_B64" | base64 --decode > test-results/auth-state.json
+
+      - id: e2e
+        name: Run preview E2E
+        if: >-
+          always() && steps.preflight.outputs.run == 'true' &&
+          steps.access.outcome == 'success' &&
+          steps.browser.outcome == 'success' && steps.auth.outcome == 'success'
+        env:
+          PLAYWRIGHT_STORAGE_STATE_PATH: test-results/auth-state.json
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: npm run test:e2e:preview
+
+      - id: evidence
+        name: Generate production-candidate evidence
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        env:
+          ACCESS_OUTCOME: ${{ steps.access.outcome }}
+          AUDIT_OUTCOME: ${{ steps.audit.outcome }}
+          AUTH_OUTCOME: ${{ steps.auth.outcome }}
+          BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+          BUDGET_OUTCOME: ${{ steps.budgets.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          CLI_OUTCOME: ${{ steps.cli.outcome }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+          DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
+          E2E_OUTCOME: ${{ steps.e2e.outcome }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          PREVIEW_URL: ${{ inputs.preview_url }}
+          ROLLBACK_TARGET: ${{ steps.rollback.outputs.id }}
+          ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
+          SOURCE_OUTCOME: ${{ steps.source.outcome }}
+          STAGING_OUTCOME: ${{ steps.staging.outcome }}
+          TYPECHECK_OUTCOME: ${{ steps.typecheck.outcome }}
+          UNIT_OUTCOME: ${{ steps.unit.outcome }}
+        run: |
+          status() {
+            if [ "$1" = success ]; then echo pass; else echo fail; fi
+          }
+          if [ "$ACCESS_OUTCOME" = success ] &&
+            [ "$BROWSER_OUTCOME" = success ] &&
+            [ "$AUTH_OUTCOME" = success ] &&
+            [ "$E2E_OUTCOME" = success ]; then
+            preview_status=pass
+          else
+            preview_status=fail
+          fi
+          staging_artifact=()
+          if [ -f test-results/staging-evidence-index.json ]; then
+            staging_artifact=(--artifact staging-evidence=test-results/staging-evidence-index.json)
+          fi
+          deployment_args=(--deployment-url "$PREVIEW_URL")
+          if [ -n "$DEPLOYMENT_ID" ]; then
+            deployment_args+=(--deployment-id "$DEPLOYMENT_ID")
+          fi
+          if [ -n "$ROLLBACK_TARGET" ]; then
+            deployment_args+=(--rollback-target "$ROLLBACK_TARGET")
+          fi
+          npm run evidence:release -- \
+            --environment production-candidate \
+            --output release-evidence.json \
+            "${deployment_args[@]}" \
+            --require-clean \
+            --require-passing immutable-source,deployment-commit,rollback-target,pinned-clis,production-audit,lint,typecheck,unit,build,route-budgets,preview-access,preview-e2e,staging-evidence \
+            --check "immutable-source=$(status "$SOURCE_OUTCOME")" \
+            --check "deployment-commit=$(status "$DEPLOYMENT_OUTCOME")" \
+            --check "rollback-target=$(status "$ROLLBACK_OUTCOME")" \
+            --check "pinned-clis=$(status "$CLI_OUTCOME")" \
+            --check "production-audit=$(status "$AUDIT_OUTCOME")" \
+            --check "lint=$(status "$LINT_OUTCOME")" \
+            --check "typecheck=$(status "$TYPECHECK_OUTCOME")" \
+            --check "unit=$(status "$UNIT_OUTCOME")" \
+            --check "build=$(status "$BUILD_OUTCOME")" \
+            --check "route-budgets=$(status "$BUDGET_OUTCOME")" \
+            --check "preview-access=$(status "$ACCESS_OUTCOME")" \
+            --check "preview-e2e=$preview_status" \
+            --check "staging-evidence=$(status "$STAGING_OUTCOME")" \
+            "${staging_artifact[@]}"
+
+      - name: Upload production-candidate evidence
+        if: always() && steps.preflight.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-candidate-${{ inputs.candidate_commit }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            release-evidence.json
+            performance/contract.json
+            performance/artifacts/route-budgets.json
+            performance/schemas/v1/release-evidence.schema.json
+            test-results/staging-evidence-index.json
+
+  promote:
+    needs: validate
+    if: needs.validate.outputs.ready == 'true' && inputs.confirm_promotion
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.candidate_commit }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install pinned Vercel CLI
+        run: npm ci
+
+      - name: Download candidate evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: production-candidate-${{ inputs.candidate_commit }}
+          path: test-results/production-candidate
+
+      - id: candidate
+        name: Recheck candidate evidence
+        env:
+          CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
+          PREVIEW_URL: ${{ inputs.preview_url }}
+        run: |
+          node -e '
+            const { createHash } = require("node:crypto");
+            const fs = require("node:fs");
+            const evidence = JSON.parse(fs.readFileSync("test-results/production-candidate/release-evidence.json", "utf8"));
+            const contract = fs.readFileSync("performance/contract.json");
+            if (
+              evidence.environment !== "production-candidate" ||
+              evidence.overallStatus !== "pass" ||
+              evidence.source.commit !== process.env.CANDIDATE_COMMIT ||
+              evidence.contract.sha256 !== createHash("sha256").update(contract).digest("hex") ||
+              evidence.deployment.url !== new URL(process.env.PREVIEW_URL).origin ||
+              !evidence.deployment.id ||
+              !evidence.deployment.rollbackTarget ||
+              evidence.checks.some((check) => check.status !== "pass")
+            ) {
+              throw new Error("Candidate evidence does not authorize this promotion.");
+            }
+            fs.appendFileSync(
+              process.env.GITHUB_OUTPUT,
+              `deployment_id=${evidence.deployment.id}\n` +
+                `deployment_url=${evidence.deployment.url}\n` +
+                `rollback_target=${evidence.deployment.rollbackTarget}\n`,
+            );
+          '
+
+      - id: promotion
+        name: Promote tested preview
+        env:
+          DEPLOYMENT_TARGET: ${{ steps.candidate.outputs.deployment_id }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          test -n "$VERCEL_TOKEN"
+          test -n "$VERCEL_ORG_ID"
+          test -n "$VERCEL_PROJECT_ID"
+          npx --no-install vercel promote "$DEPLOYMENT_TARGET" \
+            --yes
+
+      - name: Generate production evidence
+        if: always() && steps.candidate.outcome == 'success'
+        env:
+          DEPLOYMENT_ID: ${{ steps.candidate.outputs.deployment_id }}
+          DEPLOYMENT_URL: ${{ steps.candidate.outputs.deployment_url }}
+          PROMOTION_OUTCOME: ${{ steps.promotion.outcome }}
+          ROLLBACK_TARGET: ${{ steps.candidate.outputs.rollback_target }}
+        run: |
+          if [ "$PROMOTION_OUTCOME" = success ]; then
+            promotion_status=pass
+          else
+            promotion_status=fail
+          fi
+          npm run evidence:release -- \
+            --environment production \
+            --output production-release-evidence.json \
+            --deployment-url "$DEPLOYMENT_URL" \
+            --deployment-id "$DEPLOYMENT_ID" \
+            --rollback-target "$ROLLBACK_TARGET" \
+            --require-clean \
+            --require-passing candidate-evidence,promotion \
+            --check candidate-evidence=pass \
+            --check "promotion=$promotion_status" \
+            --artifact production-candidate=test-results/production-candidate/release-evidence.json
+
+      - name: Upload production evidence
+        if: always() && steps.candidate.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-release-${{ inputs.candidate_commit }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            production-release-evidence.json
+            performance/contract.json
+            performance/schemas/v1/release-evidence.schema.json
+            test-results/production-candidate/release-evidence.json

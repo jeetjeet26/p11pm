@@ -12,6 +12,16 @@
 
 # testing
 /coverage
+/playwright-report
+/test-results
+/.k6
+/k6-summary.json
+/release-evidence.json
+/production-release-evidence.json
+/data
+/performance/artifacts
+/performance/evidence
+/tests/load/.sessions*.json
 
 # next.js
 /.next/

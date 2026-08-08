@@ -1,0 +1,111 @@
+{
+  "$schema": "./schemas/v1/performance-baseline.schema.json",
+  "schemaVersion": "1.0.0",
+  "baselineVersion": "1.0.0",
+  "baselineId": "production-audit-2026-08-08",
+  "contractVersion": "1.0.0",
+  "observedAt": "2026-08-08T00:00:00.000Z",
+  "releaseReadiness": "no-go",
+  "source": {
+    "commit": null,
+    "cleanWorkingTree": false,
+    "description": "Production evidence and current-branch static analysis captured before remediation."
+  },
+  "measurements": [
+    {
+      "key": "eligible-auth-users",
+      "evidenceLevel": "measured",
+      "value": 33,
+      "unit": "users"
+    },
+    {
+      "key": "imported-profiles",
+      "evidenceLevel": "measured",
+      "value": 113,
+      "unit": "profiles"
+    },
+    {
+      "key": "projects",
+      "evidenceLevel": "measured",
+      "value": 30,
+      "unit": "projects"
+    },
+    {
+      "key": "todos",
+      "evidenceLevel": "measured",
+      "value": 619,
+      "unit": "todos"
+    },
+    {
+      "key": "activity-rows",
+      "evidenceLevel": "measured",
+      "value": 1996,
+      "unit": "rows"
+    },
+    {
+      "key": "database-size",
+      "evidenceLevel": "measured",
+      "value": 16.5,
+      "unit": "MiB"
+    },
+    {
+      "key": "workspace-loader-rows",
+      "evidenceLevel": "modeled",
+      "value": 3008,
+      "unit": "rows-per-page"
+    },
+    {
+      "key": "workspace-loader-requests",
+      "evidenceLevel": "modeled",
+      "value": 16,
+      "unit": "requests-per-page"
+    },
+    {
+      "key": "cold-dashboard-operations-per-user",
+      "evidenceLevel": "modeled",
+      "value": 22,
+      "unit": "operations"
+    },
+    {
+      "key": "cold-dashboard-operations-at-target",
+      "evidenceLevel": "modeled",
+      "value": 726,
+      "unit": "operations"
+    },
+    {
+      "key": "project-route-javascript",
+      "evidenceLevel": "measured",
+      "value": 247,
+      "unit": "KiB-brotli",
+      "approximate": true
+    },
+    {
+      "key": "chat-route-javascript",
+      "evidenceLevel": "measured",
+      "value": 233,
+      "unit": "KiB-brotli",
+      "approximate": true
+    },
+    {
+      "key": "chat-rpc-execution",
+      "evidenceLevel": "measured",
+      "value": 25,
+      "unit": "ms",
+      "operator": "<"
+    },
+    {
+      "key": "accelo-scheduled-success-rate",
+      "evidenceLevel": "measured",
+      "value": 0,
+      "unit": "ratio",
+      "sampleSize": 96
+    }
+  ],
+  "unknowns": [
+    "Representative 33-user and 66-user latency distributions",
+    "Field Core Web Vitals by route family",
+    "Database and Realtime headroom under target load",
+    "Production-shaped growth-fixture query plans",
+    "Lower-p95 Vercel region between pdx1 and sfo1"
+  ]
+}

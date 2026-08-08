@@ -1,0 +1,214 @@
+name: Preview E2E
+
+on:
+  deployment_status:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-e2e-${{ github.event.deployment.id || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+      github.event.deployment.environment == 'Preview')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PLAYWRIGHT_BASE_URL: ${{ github.event.deployment_status.target_url || secrets.PREVIEW_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.deployment.sha || github.sha }}
+
+      - id: preflight
+        name: Check preview configuration
+        env:
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          if [ -z "$PLAYWRIGHT_BASE_URL" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Preview E2E skipped; no preview URL is available."
+          elif [[ ! "$PLAYWRIGHT_BASE_URL" =~ ^https://[a-zA-Z0-9.-]+$ ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Preview E2E skipped; PREVIEW_BASE_URL must be an HTTPS origin."
+          elif [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ] || [ -z "$BYPASS_SECRET" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Preview E2E skipped; Vercel verification or bypass secrets are unavailable."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.preflight.outputs.run == 'true'
+        with:
+          node-version: 20
+          cache: npm
+
+      - id: install
+        name: Install locked dependencies
+        if: steps.preflight.outputs.run == 'true'
+        run: npm ci
+
+      - id: deployment
+        name: Verify preview deployment commit
+        if: steps.preflight.outputs.run == 'true'
+        env:
+          EXPECTED_COMMIT: ${{ github.event.deployment.sha || github.sha }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          mkdir -p test-results
+          npx --no-install vercel inspect "$PLAYWRIGHT_BASE_URL" \
+            --json > test-results/vercel-inspect.json
+          node <<'NODE'
+          const fs = require("node:fs");
+          const deployment = JSON.parse(fs.readFileSync("test-results/vercel-inspect.json", "utf8"));
+          const commitCandidates = [];
+          const projectCandidates = [];
+          const visit = (value, parent = "") => {
+            if (!value || typeof value !== "object") return;
+            for (const [key, child] of Object.entries(value)) {
+              const path = parent ? `${parent}.${key}` : key;
+              if (
+                typeof child === "string" &&
+                /^[a-f0-9]{40}$/i.test(child) &&
+                /(?:commit|git).*sha|sha.*(?:commit|git)/i.test(path)
+              ) {
+                commitCandidates.push(child.toLowerCase());
+              }
+              if (
+                typeof child === "string" &&
+                /project.*id|id.*project/i.test(path)
+              ) projectCandidates.push(child);
+              if (typeof child === "object") visit(child, path);
+            }
+          };
+          visit(deployment);
+          if (!commitCandidates.includes(process.env.EXPECTED_COMMIT)) {
+            throw new Error("Preview deployment does not map to the checked-out commit.");
+          }
+          if (!projectCandidates.includes(process.env.VERCEL_PROJECT_ID)) {
+            throw new Error("Preview deployment does not belong to VERCEL_PROJECT_ID.");
+          }
+          const state = deployment.readyState || deployment.state || deployment.status;
+          if (state && !["READY", "ready"].includes(state)) {
+            throw new Error(`Preview deployment is not ready: ${state}`);
+          }
+          if (!deployment.id) throw new Error("Preview deployment ID is unavailable.");
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `id=${deployment.id}\n`);
+          NODE
+
+      - id: access
+        name: Check preview accessibility
+        if: steps.deployment.outcome == 'success'
+        env:
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx --no-install vercel curl "$PLAYWRIGHT_BASE_URL/login" \
+            --protection-bypass "$BYPASS_SECRET" \
+            --yes \
+            -- --silent --show-error --fail --location --output /dev/null
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - id: browser
+        name: Install Chromium
+        if: steps.access.outputs.run == 'true'
+        run: npx --no-install playwright install --with-deps chromium
+
+      - id: auth
+        name: Prepare optional authenticated state
+        if: steps.access.outputs.run == 'true'
+        env:
+          AUTH_STATE_B64: ${{ secrets.PLAYWRIGHT_STORAGE_STATE_B64 }}
+        run: |
+          if [ -z "$AUTH_STATE_B64" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Authenticated E2E skipped; PLAYWRIGHT_STORAGE_STATE_B64 is unavailable."
+            exit 0
+          fi
+          mkdir -p test-results
+          printf '%s' "$AUTH_STATE_B64" | base64 --decode > test-results/auth-state.json
+          echo "available=true" >> "$GITHUB_OUTPUT"
+
+      - id: e2e
+        name: Run preview browser tests
+        if: steps.access.outputs.run == 'true'
+        env:
+          PLAYWRIGHT_STORAGE_STATE_PATH: ${{ steps.auth.outputs.available == 'true' && 'test-results/auth-state.json' || '' }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          if [ "$PLAYWRIGHT_STORAGE_STATE_PATH" ]; then
+            npm run test:e2e:preview
+          else
+            npx --no-install playwright test tests/e2e/public-smoke.spec.ts --project=chromium
+          fi
+
+      - name: Generate preview evidence
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        env:
+          ACCESS_OUTCOME: ${{ steps.access.outcome }}
+          ACCESS_RUN: ${{ steps.access.outputs.run }}
+          AUTH_OUTCOME: ${{ steps.auth.outcome }}
+          BROWSER_OUTCOME: ${{ steps.browser.outcome }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+          DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
+          E2E_OUTCOME: ${{ steps.e2e.outcome }}
+        run: |
+          case "$DEPLOYMENT_OUTCOME" in
+            success) deployment_status=pass ;;
+            *) deployment_status=fail ;;
+          esac
+          if [ "$ACCESS_OUTCOME" = success ] && [ "$ACCESS_RUN" = true ]; then
+            access_status=pass
+          elif [ "$ACCESS_OUTCOME" = success ]; then
+            access_status=not-run
+          else
+            access_status=fail
+          fi
+          if [ "$access_status" = not-run ]; then
+            e2e_status=not-run
+          elif [ "$BROWSER_OUTCOME" = success ] &&
+            [ "$AUTH_OUTCOME" = success ] &&
+            [ "$E2E_OUTCOME" = success ]; then
+            e2e_status=pass
+          else
+            e2e_status=fail
+          fi
+          deployment_args=(--deployment-url "$PLAYWRIGHT_BASE_URL")
+          if [ -n "$DEPLOYMENT_ID" ]; then
+            deployment_args+=(--deployment-id "$DEPLOYMENT_ID")
+          fi
+          npm run evidence:release -- \
+            --environment preview \
+            --output release-evidence.json \
+            "${deployment_args[@]}" \
+            --require-clean \
+            --check "deployment-commit=$deployment_status" \
+            --check "preview-access=$access_status" \
+            --check "preview-e2e=$e2e_status"
+
+      - name: Upload preview evidence
+        if: always() && steps.preflight.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-e2e-${{ github.event.deployment.sha || github.sha }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            release-evidence.json
+            performance/contract.json
+            performance/schemas/v1/release-evidence.schema.json
+            playwright-report/

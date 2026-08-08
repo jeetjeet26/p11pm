@@ -1,0 +1,39 @@
+display_information:
+  name: P11 PM
+  description: Project and task workflows for the P11 team
+  background_color: "#171717"
+features:
+  bot_user:
+    display_name: P11 PM
+    always_online: false
+  shortcuts:
+    - name: Add to PM as task
+      type: message
+      callback_id: add_to_pm_task
+      description: Turn a Slack message into a P11 PM task
+  slash_commands:
+    - command: /pm
+      url: ${P11_PM_BASE_URL}/api/slack/commands
+      description: Work with P11 PM
+      usage_hint: create task, my tasks, project status
+      should_escape: false
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:read
+      - chat:write
+      - commands
+      - groups:read
+      - users:read
+settings:
+  event_subscriptions:
+    request_url: ${P11_PM_BASE_URL}/api/slack/events
+    bot_events:
+      - app_mention
+  interactivity:
+    is_enabled: true
+    request_url: ${P11_PM_BASE_URL}/api/slack/interactions
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
