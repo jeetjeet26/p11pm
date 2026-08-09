@@ -12,32 +12,17 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getViewer } from "@/lib/auth/viewer";
 import { getDashboardData } from "@/lib/data";
-import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Home" };
 
 const P11_TIME_ZONE = "America/Los_Angeles";
 
 async function getGreetingName(): Promise<string> {
-  const supabase = await createClient();
-  if (!supabase) return "team";
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return "team";
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name")
-    .eq("id", user.id)
-    .maybeSingle();
+  const viewer = await getViewer();
   const fullName =
-    profile?.full_name ||
-    (typeof user.user_metadata.full_name === "string"
-      ? user.user_metadata.full_name
-      : "") ||
-    user.email ||
-    "team";
+    viewer?.profile.fullName || viewer?.user.email || "team";
   return fullName.trim().split(/\s+/)[0] || "team";
 }
 
