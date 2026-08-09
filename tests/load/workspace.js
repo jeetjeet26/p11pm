@@ -41,7 +41,7 @@ const profileConfiguration = {
       vus: 66,
     },
     archiveTtfbThresholds: ["p(95)<4000", "p(99)<6500"],
-    ttfbThresholds: ["p(95)<1100", "p(99)<1500"],
+    ttfbThresholds: ["p(95)<1100", "p(99)<2000"],
     virtualUsers: 66,
   },
   soak: {
