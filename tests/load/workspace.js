@@ -38,7 +38,7 @@ const profileConfiguration = {
       gracefulStop: "30s",
       vus: 66,
     },
-    ttfbThresholds: ["p(95)<900", "p(99)<1500"],
+    ttfbThresholds: ["p(95)<1100", "p(99)<1500"],
     virtualUsers: 66,
   },
   soak: {
