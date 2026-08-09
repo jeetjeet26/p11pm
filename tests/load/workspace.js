@@ -4,6 +4,7 @@ import { Rate, Trend } from "k6/metrics";
 
 import {
   BASE_URL,
+  captureResponseCookies,
   headersForVirtualUser,
   requireSessionCapacity,
 } from "./lib/config.js";
@@ -88,6 +89,7 @@ function readRoute(route, headers, routeTag = route) {
     redirects: 0,
     tags: { name: routeTag, route: routeTag },
   });
+  captureResponseCookies(response);
   serverErrors.add(response.status >= 500);
   authenticatedTtfb.add(response.timings.waiting, { route: routeTag });
   check(response, {
@@ -124,6 +126,7 @@ export default function workspaceScenario() {
         route: "/api/workspace-chat/messages",
       },
     });
+    captureResponseCookies(response);
     serverErrors.add(response.status >= 500);
     check(response, {
       "chat page is authorized": (result) => result.status === 200,

@@ -1,5 +1,4 @@
 import exec from "k6/execution";
-import http from "k6/http";
 
 const baseUrl = (__ENV.K6_BASE_URL || "").replace(/\/$/, "");
 
@@ -26,7 +25,18 @@ function loadSessions() {
 
 export const BASE_URL = baseUrl;
 export const SESSIONS = loadSessions();
-let sessionInstalled = false;
+let sessionCookies;
+
+function ensureSessionCookies() {
+  if (sessionCookies || SESSIONS.length === 0) return;
+  const index = (exec.vu.idInTest - 1) % SESSIONS.length;
+  sessionCookies = new Map();
+  for (const cookie of SESSIONS[index].split(/;\s*/)) {
+    const separator = cookie.indexOf("=");
+    if (separator <= 0) continue;
+    sessionCookies.set(cookie.slice(0, separator), cookie.slice(separator + 1));
+  }
+}
 
 export function deploymentProtectionHeaders() {
   const protectionBypass = (
@@ -42,20 +52,39 @@ export function headersForVirtualUser() {
   if (SESSIONS.length === 0 && Object.keys(protectionHeaders).length === 0) {
     return {};
   }
-  if (SESSIONS.length > 0 && !sessionInstalled) {
-    const index = (exec.vu.idInTest - 1) % SESSIONS.length;
-    const jar = http.cookieJar();
-    for (const cookie of SESSIONS[index].split(/;\s*/)) {
-      const separator = cookie.indexOf("=");
-      if (separator <= 0) continue;
-      jar.set(BASE_URL, cookie.slice(0, separator), cookie.slice(separator + 1));
-    }
-    sessionInstalled = true;
-  }
+  ensureSessionCookies();
   return {
+    ...(sessionCookies?.size
+      ? {
+          Cookie: [...sessionCookies.entries()]
+            .map(([name, value]) => `${name}=${value}`)
+            .join("; "),
+        }
+      : {}),
     ...protectionHeaders,
     "x-load-test": "p11-staging",
   };
+}
+
+export function captureResponseCookies(response) {
+  ensureSessionCookies();
+  const header = response.headers["Set-Cookie"];
+  if (!sessionCookies || !header) return;
+  for (const cookie of header.split(/,(?=[^;,]+=)/)) {
+    const [pair, ...attributes] = cookie.split(";");
+    const separator = pair.indexOf("=");
+    if (separator <= 0) continue;
+    const name = pair.slice(0, separator);
+    const value = pair.slice(separator + 1);
+    const expired = attributes.some(
+      (attribute) => attribute.trim().toLowerCase() === "max-age=0",
+    );
+    if (!value || expired) {
+      sessionCookies.delete(name);
+    } else {
+      sessionCookies.set(name, value);
+    }
+  }
 }
 
 export function requireSessionCapacity(virtualUsers) {
