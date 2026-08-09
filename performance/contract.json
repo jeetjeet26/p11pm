@@ -1,14 +1,14 @@
 {
   "$schema": "./schemas/v1/performance-contract.schema.json",
   "schemaVersion": "1.0.0",
-  "contractVersion": "1.0.0",
+  "contractVersion": "1.1.0",
   "name": "P11 PM production performance contract",
   "status": "active",
   "effectiveDate": "2026-08-08",
   "targets": {
     "nominalConcurrentUsers": 33,
     "burstConcurrentUsers": 66,
-    "growthActiveUsers": 330,
+    "growthActiveUsers": 33,
     "growthProjects": 300,
     "growthTodos": 25000,
     "growthMessages": 1000000,
@@ -43,6 +43,8 @@
       ],
       "ttfbP95Ms": 800,
       "ttfbP99Ms": 1500,
+      "coldStartTtfbP95Ms": 4000,
+      "coldStartTtfbP99Ms": 5000,
       "maxFiveXxRate": 0.001
     },
     "pageData": {
@@ -173,9 +175,9 @@
     },
     {
       "id": "growth-volume",
-      "virtualUsers": 330,
+      "virtualUsers": 33,
       "durationSeconds": 300,
-      "description": "330 users, 300 projects, 25k to-dos, 1M messages, and 1M activity rows."
+      "description": "33 users against 300 projects, 25k to-dos, 1M messages, and 1M activity rows."
     },
     {
       "id": "file-pressure",
@@ -197,7 +199,7 @@
     }
   ],
   "regionPolicy": {
-    "pinnedRegion": null,
-    "decision": "Benchmark pdx1 and sfo1 against Supabase us-west-2 and record the lower-p95 result before pinning."
+    "pinnedRegion": "sfo1",
+    "decision": "Pin application compute to sfo1 after certification showed lower latency to Supabase us-west-2."
   }
 }

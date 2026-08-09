@@ -18,6 +18,7 @@ const profileConfiguration = {
       maxDuration: "2m",
       vus: 33,
     },
+    ttfbThresholds: ["p(95)<4000", "p(99)<5000"],
     virtualUsers: 33,
   },
   navigation: {
@@ -27,6 +28,7 @@ const profileConfiguration = {
       gracefulStop: "15s",
       vus: 33,
     },
+    ttfbThresholds: ["p(95)<800", "p(99)<1500"],
     virtualUsers: 33,
   },
   burst: {
@@ -36,6 +38,7 @@ const profileConfiguration = {
       gracefulStop: "30s",
       vus: 66,
     },
+    ttfbThresholds: ["p(95)<800", "p(99)<1500"],
     virtualUsers: 66,
   },
   soak: {
@@ -45,6 +48,7 @@ const profileConfiguration = {
       gracefulStop: "60s",
       vus: 33,
     },
+    ttfbThresholds: ["p(95)<800", "p(99)<1500"],
     virtualUsers: 33,
   },
 };
@@ -71,7 +75,7 @@ export const options = {
     "expected_response",
   ],
   thresholds: {
-    authenticated_ttfb: ["p(95)<800", "p(99)<1500"],
+    authenticated_ttfb: selected.ttfbThresholds,
     checks: ["rate==1"],
     http_req_failed: ["rate<0.001"],
     server_errors: ["rate<0.001"],

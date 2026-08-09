@@ -24,6 +24,10 @@ Release evidence contains only normalized deployment metadata, checksums, and
 check outcomes. It never copies environment variables, request data, user
 identifiers, or artifact contents.
 
-The contract intentionally leaves `regionPolicy.pinnedRegion` unset. Benchmark
-`pdx1` and `sfo1` against the Supabase region, record the result as evidence,
-then update the contract in a reviewed change.
+The `target` profile is an intentional cold-start storm: all 33 users enter the
+workspace together after an idle deployment. It uses the separate cold-start
+TTFB budget. Navigation, burst, and soak profiles retain the stricter steady-
+state authenticated-page TTFB budget.
+
+The contract pins application compute to `sfo1`, the lower-latency measured
+region for the Supabase `us-west-2` database.
