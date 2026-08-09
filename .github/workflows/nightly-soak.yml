@@ -142,7 +142,7 @@ jobs:
         name: Run one-hour soak
         if: steps.deployment.outcome == 'success'
         env:
-          K6_SESSION_FILE: test-results/k6-sessions.json
+          K6_SESSION_FILE: ${{ github.workspace }}/test-results/k6-sessions.json
         run: k6 run --summary-export k6-summary.json tests/load/workspace.js
 
       - name: Generate soak evidence
