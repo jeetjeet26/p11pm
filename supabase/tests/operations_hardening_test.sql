@@ -23,8 +23,9 @@ begin
   from storage.buckets where id = 'project-files';
   select file_size_limit into chat_limit
   from storage.buckets where id = 'workspace-chat-files';
-  if project_limit <> 26214400 or chat_limit <> 26214400 then
-    raise exception 'Both upload buckets must enforce the 25 MB limit';
+  if project_limit <> 4294967296 or chat_limit <> 26214400 then
+    raise exception
+      'Project files must allow 4 GiB exports while chat stays at 25 MB';
   end if;
 
   if to_regprocedure(

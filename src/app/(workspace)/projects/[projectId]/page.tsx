@@ -1,6 +1,6 @@
-import { ArrowLeft, Hash } from "lucide-react";
+import { ArrowLeft, Hash, History } from "lucide-react";
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { ProjectWorkspace } from "@/components/projects/project-workspace";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -18,6 +18,7 @@ export default async function ProjectPage({
   const data = await getProjectOverviewData(projectId);
   if (!data) notFound();
   const { project, members } = data;
+  if (project.isReadOnly) redirect(`/archive/${project.id}`);
 
   return (
     <div className="space-y-6">
@@ -47,6 +48,14 @@ export default async function ProjectPage({
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+            {project.sourceSystem === "basecamp" && (
+              <Button asChild size="sm" variant="outline">
+                <Link href={`/archive/${project.id}`}>
+                  <History />
+                  Basecamp history
+                </Link>
+              </Button>
+            )}
             <div className="flex -space-x-2">
               {members.map((member) => (
                 <Avatar className="size-8 border-2 border-card" key={member.id}>

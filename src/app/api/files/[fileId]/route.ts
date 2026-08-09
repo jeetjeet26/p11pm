@@ -1,3 +1,4 @@
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(
@@ -19,22 +20,32 @@ export async function GET(
   }
 
   const { fileId } = await params;
-  const { data, error } = await supabase
-    .from("files")
-    .select("bucket_id,object_path,file_name")
-    .eq("id", fileId)
-    .maybeSingle();
+  const { data, error } = await supabase.rpc(
+    "resolve_basecamp_download_target",
+    {
+      file_id: fileId,
+      archive_entry_id: null,
+    },
+  );
   if (error) {
     console.error("Read project file failed:", error);
     return Response.json({ error: "Could not read the file." }, { status: 500 });
   }
-  if (!data) {
+  const target = data?.[0];
+  if (!target) {
     return Response.json({ error: "File not found." }, { status: 404 });
   }
 
-  const { data: signed, error: signedError } = await supabase.storage
-    .from(data.bucket_id)
-    .createSignedUrl(data.object_path, 60, { download: data.file_name });
+  const admin = createAdminClient();
+  if (!admin) {
+    return Response.json(
+      { error: "File delivery is not configured." },
+      { status: 503 },
+    );
+  }
+  const { data: signed, error: signedError } = await admin.storage
+    .from(target.bucket_id)
+    .createSignedUrl(target.object_path, 60, { download: target.file_name });
   if (signedError) {
     console.error("Sign project file download failed:", signedError);
     return Response.json(

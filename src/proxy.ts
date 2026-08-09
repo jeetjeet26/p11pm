@@ -77,5 +77,6 @@ export const config = {
     "/my-work/:path*",
     "/activity/:path*",
     "/admin/:path*",
+    "/archive/:path*",
   ],
 };

@@ -10,7 +10,7 @@ test.describe("authenticated workspace navigation", () => {
     "Set PLAYWRIGHT_STORAGE_STATE_PATH to a runtime-only Playwright state file.",
   );
 
-  for (const route of ["/dashboard", "/projects", "/team", "/chat"]) {
+  for (const route of ["/dashboard", "/projects", "/archive", "/team", "/chat"]) {
     test(`${route} remains available to an authenticated viewer`, async ({
       page,
     }, testInfo) => {

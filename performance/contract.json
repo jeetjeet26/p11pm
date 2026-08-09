@@ -36,6 +36,8 @@
     "authenticatedPages": {
       "routes": [
         "/dashboard",
+        "/archive",
+        "/archive/[projectId]",
         "/projects",
         "/projects/[projectId]",
         "/team",
@@ -70,6 +72,16 @@
           "route": "/login",
           "nextRouteKey": "/login/page",
           "maxKiB": 160
+        },
+        {
+          "route": "/archive",
+          "nextRouteKey": "/(workspace)/archive/page",
+          "maxKiB": 200
+        },
+        {
+          "route": "/archive/[projectId]",
+          "nextRouteKey": "/(workspace)/archive/[projectId]/page",
+          "maxKiB": 200
         },
         {
           "route": "/projects",

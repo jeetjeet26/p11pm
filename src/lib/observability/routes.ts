@@ -2,6 +2,7 @@ const STATIC_ROUTES = new Set([
   "/",
   "/activity",
   "/admin",
+  "/archive",
   "/chat",
   "/dashboard",
   "/invite",
@@ -48,9 +49,13 @@ function pathnameOf(value: string): string {
 export function normalizeRoute(value: string): string {
   const pathname = pathnameOf(value).replace(/\/+$/, "") || "/";
   if (STATIC_ROUTES.has(pathname)) return pathname;
+  if (/^\/archive\/[^/]+$/.test(pathname)) return "/archive/[projectId]";
   if (/^\/projects\/[^/]+$/.test(pathname)) return "/projects/[projectId]";
   if (/^\/chat\/.+$/.test(pathname)) return "/chat/[conversationId]";
   if (/^\/api\/files\/[^/]+$/.test(pathname)) return "/api/files/[fileId]";
+  if (/^\/api\/archive\/files\/[^/]+$/.test(pathname)) {
+    return "/api/archive/files/[entryId]";
+  }
   if (/^\/api\/files\/uploads\/[^/]+$/.test(pathname)) {
     return "/api/files/uploads/[reservationId]";
   }

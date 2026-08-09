@@ -24,6 +24,8 @@ export interface Project {
   color: string;
   acceloJobId?: string;
   slackChannel?: string;
+  isReadOnly?: boolean;
+  sourceSystem?: string;
   progress: number;
   updatedAt: string;
   memberIds: string[];

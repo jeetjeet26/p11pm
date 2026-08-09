@@ -187,19 +187,33 @@ export async function getProjectOverviewData(
 ): Promise<ProjectOverviewData | null> {
   return productionOrDemo<ProjectOverviewData | null>(
     async () => {
-      const row = await callProjectRpc("get_project_overview_data", {
-        target_project_id: projectId,
-        after_milestone_due_date: null,
-        after_milestone_id: null,
-        requested_milestone_limit: 20,
-        requested_document_limit: 50,
-        requested_chat_limit: 50,
-      });
+      const [row, supabase] = await Promise.all([
+        callProjectRpc("get_project_overview_data", {
+          target_project_id: projectId,
+          after_milestone_due_date: null,
+          after_milestone_id: null,
+          requested_milestone_limit: 20,
+          requested_document_limit: 50,
+          requested_chat_limit: 50,
+        }),
+        createClient(),
+      ]);
       if (!row.project) return null;
+      const { data: projectFlags, error: projectFlagsError } = supabase
+        ? await supabase
+            .from("projects")
+            .select("is_read_only,basecamp_account_id")
+            .eq("id", projectId)
+            .maybeSingle()
+        : { data: null, error: null };
+      if (projectFlagsError) throw projectFlagsError;
       const counts = asRecord(row.tab_counts);
       const milestoneCursor = asRecord(row.next_milestone_cursor);
       return {
-        project: mapProject(row.project),
+        project: mapProject({
+          ...asRecord(row.project),
+          ...asRecord(projectFlags),
+        }),
         members: asRows(row.members).map(mapProfile),
         milestones: asRows(row.milestones).map(mapMilestone),
         documents: asRows(row.documents).map(mapDocument),

@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  Archive,
   BriefcaseBusiness,
   ChevronDown,
   ClipboardCheck,
@@ -47,6 +48,7 @@ const navigation = [
   { href: "/team", label: "Team view", icon: Users, adminOnly: false },
   { href: "/my-work", label: "My assignments", icon: ClipboardCheck, adminOnly: false },
   { href: "/activity", label: "Latest activity", icon: Activity, adminOnly: false },
+  { href: "/archive", label: "Basecamp archive", icon: Archive, adminOnly: false },
   {
     href: "/admin",
     label: "Workspace admin",

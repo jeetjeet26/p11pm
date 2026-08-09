@@ -106,6 +106,10 @@ export function mapProject(value: unknown): Project {
       asString(metadata.slack_channel_name) ||
       asString(metadata.slack_channel) ||
       undefined,
+    isReadOnly: row.is_read_only === true,
+    sourceSystem:
+      asString(row.source_system) ||
+      (row.basecamp_account_id ? "basecamp" : undefined),
     progress: Math.max(0, Math.min(100, asNumber(row.progress, asNumber(metadata.progress)))),
     updatedAt: asString(row.updated_at, new Date(0).toISOString()),
     memberIds: asStrings(row.member_ids),
@@ -143,7 +147,8 @@ export function mapTodo(value: unknown): Todo {
     assigneeId: asString(row.assigned_to) || undefined,
     assigneeIds,
     completionSubscriberIds: asStrings(row.completion_subscriber_ids),
-    dueDate: asString(row.due_at).slice(0, 10) || undefined,
+    dueDate:
+      (asString(row.due_on) || asString(row.due_at)).slice(0, 10) || undefined,
     status: statusMap[asString(row.status, "todo")] ?? "open",
     priority:
       sourcePriority === "medium"

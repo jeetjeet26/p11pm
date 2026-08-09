@@ -10,6 +10,12 @@ describe("observability route normalization", () => {
     expect(normalizeRoute("/chat/private-conversation#thread")).toBe(
       "/chat/[conversationId]",
     );
+    expect(normalizeRoute("/archive/private-project?from=2020-01-01")).toBe(
+      "/archive/[projectId]",
+    );
+    expect(normalizeRoute("/api/archive/files/private-entry")).toBe(
+      "/api/archive/files/[entryId]",
+    );
   });
 
   it("normalizes Next route groups and API identifiers", () => {
