@@ -30,7 +30,9 @@ jobs:
         name: Check soak configuration
         env:
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-          SESSION_FILE_B64: ${{ secrets.K6_SESSION_FILE_B64 }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -38,9 +40,12 @@ jobs:
           if [[ ! "$CANDIDATE_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Nightly soak skipped; candidate_commit must be a full lowercase SHA."
-          elif [ -z "$K6_BASE_URL" ] || [ -z "$SESSION_FILE_B64" ]; then
+          elif [ -z "$K6_BASE_URL" ] ||
+            [ -z "$SUPABASE_URL" ] ||
+            [ -z "$SUPABASE_PUBLISHABLE_KEY" ] ||
+            [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Nightly soak skipped; STAGING_BASE_URL or K6_SESSION_FILE_B64 is unavailable."
+            echo "::notice::Nightly soak skipped; staging or Supabase credentials are unavailable."
           elif [[ ! "$K6_BASE_URL" =~ ^https://[a-zA-Z0-9.-]+$ ]]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Nightly soak skipped; STAGING_BASE_URL must be an HTTPS origin."
@@ -127,10 +132,12 @@ jobs:
         name: Prepare runtime-only sessions
         if: steps.deployment.outcome == 'success'
         env:
-          SESSION_FILE_B64: ${{ secrets.K6_SESSION_FILE_B64 }}
-        run: |
-          mkdir -p test-results
-          printf '%s' "$SESSION_FILE_B64" | base64 --decode > test-results/k6-sessions.json
+          K6_SESSION_COUNT: 33
+          K6_SESSION_OUTPUT: test-results/k6-sessions.json
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        run: node scripts/generate-load-sessions.mjs
 
       - id: soak
         name: Run one-hour soak

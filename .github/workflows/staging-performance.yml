@@ -38,7 +38,9 @@ jobs:
         env:
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           CANDIDATE_COMMIT: ${{ inputs.candidate_commit }}
-          SESSION_FILE_B64: ${{ secrets.K6_SESSION_FILE_B64 }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -52,9 +54,12 @@ jobs:
           elif [[ ! "$K6_BASE_URL" =~ ^https://[a-zA-Z0-9.-]+$ ]]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Staging performance skipped; STAGING_BASE_URL must be an HTTPS origin."
-          elif [ "$K6_PROFILE" != smoke ] && [ -z "$SESSION_FILE_B64" ]; then
+          elif [ "$K6_PROFILE" != smoke ] &&
+            { [ -z "$SUPABASE_URL" ] ||
+              [ -z "$SUPABASE_PUBLISHABLE_KEY" ] ||
+              [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; }; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Authenticated load skipped; K6_SESSION_FILE_B64 is unavailable."
+            echo "::notice::Authenticated load skipped; Supabase credentials are unavailable."
           elif [ -z "$BYPASS_SECRET" ] || [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Staging performance skipped; Vercel verification or bypass secrets are unavailable."
@@ -139,10 +144,17 @@ jobs:
         name: Prepare runtime-only sessions
         if: steps.deployment.outcome == 'success' && env.K6_PROFILE != 'smoke'
         env:
-          SESSION_FILE_B64: ${{ secrets.K6_SESSION_FILE_B64 }}
+          K6_SESSION_OUTPUT: test-results/k6-sessions.json
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         run: |
-          mkdir -p test-results
-          printf '%s' "$SESSION_FILE_B64" | base64 --decode > test-results/k6-sessions.json
+          if [ "$K6_PROFILE" = burst ]; then
+            export K6_SESSION_COUNT=66
+          else
+            export K6_SESSION_COUNT=33
+          fi
+          node scripts/generate-load-sessions.mjs
 
       - id: load
         name: Run contract load profile
