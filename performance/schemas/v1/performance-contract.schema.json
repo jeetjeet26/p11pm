@@ -116,6 +116,7 @@
       "required": [
         "webVitals",
         "authenticatedPages",
+        "archivePages",
         "pageData",
         "clientJavascript",
         "mutations",
@@ -130,6 +131,9 @@
           "$ref": "#/$defs/webVitalsBudget"
         },
         "authenticatedPages": {
+          "$ref": "#/$defs/authenticatedPagesBudget"
+        },
+        "archivePages": {
           "$ref": "#/$defs/authenticatedPagesBudget"
         },
         "pageData": {

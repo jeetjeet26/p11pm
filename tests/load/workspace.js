@@ -18,6 +18,7 @@ const profileConfiguration = {
       maxDuration: "2m",
       vus: 33,
     },
+    archiveTtfbThresholds: ["p(95)<6000", "p(99)<8000"],
     ttfbThresholds: ["p(95)<4000", "p(99)<6500"],
     virtualUsers: 33,
   },
@@ -28,6 +29,7 @@ const profileConfiguration = {
       gracefulStop: "15s",
       vus: 33,
     },
+    archiveTtfbThresholds: ["p(95)<3500", "p(99)<5000"],
     ttfbThresholds: ["p(95)<800", "p(99)<2500"],
     virtualUsers: 33,
   },
@@ -38,6 +40,7 @@ const profileConfiguration = {
       gracefulStop: "30s",
       vus: 66,
     },
+    archiveTtfbThresholds: ["p(95)<4000", "p(99)<6500"],
     ttfbThresholds: ["p(95)<1100", "p(99)<1500"],
     virtualUsers: 66,
   },
@@ -48,6 +51,7 @@ const profileConfiguration = {
       gracefulStop: "60s",
       vus: 33,
     },
+    archiveTtfbThresholds: ["p(95)<3500", "p(99)<5000"],
     ttfbThresholds: ["p(95)<800", "p(99)<2500"],
     virtualUsers: 33,
   },
@@ -60,6 +64,7 @@ if (!profileConfiguration[profile]) {
 const selected = profileConfiguration[profile];
 const serverErrors = new Rate("server_errors");
 const authenticatedTtfb = new Trend("authenticated_ttfb", true);
+const archiveTtfb = new Trend("archive_ttfb", true);
 
 export const options = {
   scenarios: {
@@ -75,6 +80,7 @@ export const options = {
     "expected_response",
   ],
   thresholds: {
+    archive_ttfb: selected.archiveTtfbThresholds,
     authenticated_ttfb: selected.ttfbThresholds,
     checks: ["rate==1"],
     http_req_failed: ["rate<0.001"],
@@ -95,7 +101,9 @@ function readRoute(route, headers, routeTag = route) {
   });
   captureResponseCookies(response);
   serverErrors.add(response.status >= 500);
-  authenticatedTtfb.add(response.timings.waiting, { route: routeTag });
+  const ttfbMetric =
+    routeTag === "/archive" ? archiveTtfb : authenticatedTtfb;
+  ttfbMetric.add(response.timings.waiting, { route: routeTag });
   check(response, {
     [`${routeTag} returned 200`]: (result) => result.status === 200,
   });

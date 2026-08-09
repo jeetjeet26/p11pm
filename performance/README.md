@@ -31,6 +31,9 @@ while navigation and soak retain the strict steady-state authenticated-page
 TTFB budget. The cold target sends every user through the Basecamp archive;
 long-running profiles distribute archive reads across ten percent of iterations
 to model occasional historical lookup instead of continuous archive refreshes.
+Archive TTFB is reported against its own historical-query budget so it cannot
+hide regressions in the latency-sensitive dashboard, project, team, or chat
+routes.
 
 The contract pins application compute to `sfo1`, the lower-latency measured
 region for the Supabase `us-west-2` database.
