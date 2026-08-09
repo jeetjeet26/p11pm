@@ -92,8 +92,11 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           mkdir -p test-results
-          npx --no-install vercel inspect "$K6_BASE_URL" \
-            --json > test-results/vercel-inspect.json
+          deployment_host="${K6_BASE_URL#https://}"
+          curl --silent --show-error --fail \
+            --header "Authorization: Bearer $VERCEL_TOKEN" \
+            "https://api.vercel.com/v13/deployments/$deployment_host?teamId=$VERCEL_ORG_ID" \
+            --output test-results/vercel-inspect.json
           node <<'NODE'
           const fs = require("node:fs");
           const deployment = JSON.parse(fs.readFileSync("test-results/vercel-inspect.json", "utf8"));
@@ -129,9 +132,8 @@ jobs:
           if (!deployment.id) throw new Error("Staging deployment ID is unavailable.");
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `id=${deployment.id}\n`);
           NODE
-          npx --no-install vercel curl "$K6_BASE_URL/login" \
-            --yes \
-            -- --silent --show-error --fail --location --output /dev/null
+          curl "$K6_BASE_URL/login" \
+            --silent --show-error --fail --location --output /dev/null
 
       - id: k6
         uses: grafana/setup-k6-action@v1
