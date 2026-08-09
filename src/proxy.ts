@@ -57,7 +57,15 @@ export async function proxy(request: NextRequest) {
     return loginRedirect(request, response);
   }
 
-  return response;
+  const upstreamHeaders = new Headers(request.headers);
+  upstreamHeaders.set("x-p11-verified-user-id", claims.sub);
+  const authenticatedResponse = NextResponse.next({
+    request: { headers: upstreamHeaders },
+  });
+  response.cookies.getAll().forEach((cookie) => {
+    authenticatedResponse.cookies.set(cookie);
+  });
+  return authenticatedResponse;
 }
 
 export const config = {

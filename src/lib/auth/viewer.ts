@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import { headers } from "next/headers";
 
 import { createClient } from "@/lib/supabase/server";
 
@@ -40,18 +41,21 @@ export const getViewer = cache(async (): Promise<ViewerContext | null> => {
   const supabase = await createClient();
   if (!supabase) return null;
 
-  const { data: claimsData, error: claimsError } =
-    await supabase.auth.getClaims();
-  const claims = claimsData?.claims;
-  const email = typeof claims?.email === "string" ? claims.email : null;
-  if (claimsError || !claims?.sub || !email) return null;
+  const requestHeaders = await headers();
+  let userId = requestHeaders.get("x-p11-verified-user-id");
+  if (!userId) {
+    const { data: claimsData, error: claimsError } =
+      await supabase.auth.getClaims();
+    userId = claimsError ? null : (claimsData?.claims.sub ?? null);
+  }
+  if (!userId) return null;
 
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select(
       "id,organization_id,email,full_name,title,avatar_url,role,status,organization:organizations!inner(id,name,slug)",
     )
-    .eq("id", claims.sub)
+    .eq("id", userId)
     .eq("status", "active")
     .not("organization_id", "is", null)
     .maybeSingle();
@@ -62,7 +66,6 @@ export const getViewer = cache(async (): Promise<ViewerContext | null> => {
   if (profileError) throw profileError;
   if (
     !profile?.organization_id ||
-    profile.email.toLowerCase() !== email.toLowerCase() ||
     !isViewerRole(profile.role) ||
     !organization
   ) {
@@ -71,8 +74,8 @@ export const getViewer = cache(async (): Promise<ViewerContext | null> => {
 
   return {
     user: {
-      id: claims.sub,
-      email,
+      id: userId,
+      email: profile.email,
     },
     profile: {
       id: profile.id,
