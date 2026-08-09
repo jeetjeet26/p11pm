@@ -1,4 +1,5 @@
 import exec from "k6/execution";
+import http from "k6/http";
 
 const baseUrl = (__ENV.K6_BASE_URL || "").replace(/\/$/, "");
 
@@ -25,6 +26,7 @@ function loadSessions() {
 
 export const BASE_URL = baseUrl;
 export const SESSIONS = loadSessions();
+let sessionInstalled = false;
 
 export function deploymentProtectionHeaders() {
   const protectionBypass = (
@@ -40,10 +42,17 @@ export function headersForVirtualUser() {
   if (SESSIONS.length === 0 && Object.keys(protectionHeaders).length === 0) {
     return {};
   }
-  const index =
-    SESSIONS.length > 0 ? (exec.vu.idInTest - 1) % SESSIONS.length : 0;
+  if (SESSIONS.length > 0 && !sessionInstalled) {
+    const index = (exec.vu.idInTest - 1) % SESSIONS.length;
+    const jar = http.cookieJar();
+    for (const cookie of SESSIONS[index].split(/;\s*/)) {
+      const separator = cookie.indexOf("=");
+      if (separator <= 0) continue;
+      jar.set(BASE_URL, cookie.slice(0, separator), cookie.slice(separator + 1));
+    }
+    sessionInstalled = true;
+  }
   return {
-    ...(SESSIONS.length > 0 ? { Cookie: SESSIONS[index] } : {}),
     ...protectionHeaders,
     "x-load-test": "p11-staging",
   };
