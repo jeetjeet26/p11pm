@@ -28,7 +28,9 @@ The `target` profile is an intentional cold-start storm: all 33 users enter the
 workspace together after an idle deployment. It uses the separate cold-start
 TTFB budget. The 66-session burst profile has a separate saturation budget,
 while navigation and soak retain the strict steady-state authenticated-page
-TTFB budget.
+TTFB budget. The cold target sends every user through the Basecamp archive;
+long-running profiles distribute archive reads across ten percent of iterations
+to model occasional historical lookup instead of continuous archive refreshes.
 
 The contract pins application compute to `sfo1`, the lower-latency measured
 region for the Supabase `us-west-2` database.

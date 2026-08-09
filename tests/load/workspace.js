@@ -106,7 +106,9 @@ export default function workspaceScenario() {
 
   group("bounded workspace navigation", () => {
     readRoute("/dashboard", headers);
-    readRoute("/archive", headers);
+    if (profile === "target" || (__VU + __ITER) % 10 === 0) {
+      readRoute("/archive", headers);
+    }
     readRoute("/projects", headers);
     if (__ENV.K6_PROJECT_ID) {
       readRoute(
