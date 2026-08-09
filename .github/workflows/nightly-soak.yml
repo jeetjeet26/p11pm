@@ -29,7 +29,6 @@ jobs:
       - id: preflight
         name: Check soak configuration
         env:
-          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -49,9 +48,9 @@ jobs:
           elif [[ ! "$K6_BASE_URL" =~ ^https://[a-zA-Z0-9.-]+$ ]]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "::notice::Nightly soak skipped; STAGING_BASE_URL must be an HTTPS origin."
-          elif [ -z "$BYPASS_SECRET" ] || [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
+          elif [ -z "$VERCEL_TOKEN" ] || [ -z "$VERCEL_ORG_ID" ] || [ -z "$VERCEL_PROJECT_ID" ]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Nightly soak skipped; Vercel verification or bypass secrets are unavailable."
+            echo "::notice::Nightly soak skipped; Vercel verification secrets are unavailable."
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
           fi
@@ -76,7 +75,6 @@ jobs:
         name: Verify staging deployment commit
         if: steps.preflight.outputs.run == 'true'
         env:
-          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
@@ -120,7 +118,6 @@ jobs:
           fs.appendFileSync(process.env.GITHUB_OUTPUT, `id=${deployment.id}\n`);
           NODE
           npx --no-install vercel curl "$K6_BASE_URL/login" \
-            --protection-bypass "$BYPASS_SECRET" \
             --yes \
             -- --silent --show-error --fail --location --output /dev/null
 
@@ -144,7 +141,6 @@ jobs:
         if: steps.deployment.outcome == 'success'
         env:
           K6_SESSION_FILE: test-results/k6-sessions.json
-          K6_VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: k6 run --summary-export k6-summary.json tests/load/workspace.js
 
       - name: Generate soak evidence
