@@ -106,6 +106,7 @@ export default function workspaceScenario() {
 
   group("bounded workspace navigation", () => {
     readRoute("/dashboard", headers);
+    readRoute("/archive", headers);
     readRoute("/projects", headers);
     if (__ENV.K6_PROJECT_ID) {
       readRoute(
