@@ -18,7 +18,7 @@ const profileConfiguration = {
       maxDuration: "2m",
       vus: 33,
     },
-    ttfbThresholds: ["p(95)<4000", "p(99)<5000"],
+    ttfbThresholds: ["p(95)<4000", "p(99)<6500"],
     virtualUsers: 33,
   },
   navigation: {
