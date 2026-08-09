@@ -1,7 +1,7 @@
 {
   "$schema": "./schemas/v1/performance-contract.schema.json",
   "schemaVersion": "1.0.0",
-  "contractVersion": "1.1.0",
+  "contractVersion": "1.2.0",
   "name": "P11 PM production performance contract",
   "status": "active",
   "effectiveDate": "2026-08-08",
@@ -45,6 +45,8 @@
       "ttfbP99Ms": 1500,
       "coldStartTtfbP95Ms": 4000,
       "coldStartTtfbP99Ms": 5000,
+      "burstTtfbP95Ms": 900,
+      "burstTtfbP99Ms": 1500,
       "maxFiveXxRate": 0.001
     },
     "pageData": {

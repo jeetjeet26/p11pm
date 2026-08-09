@@ -296,6 +296,12 @@
         "coldStartTtfbP99Ms": {
           "$ref": "#/$defs/positiveNumber"
         },
+        "burstTtfbP95Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
+        "burstTtfbP99Ms": {
+          "$ref": "#/$defs/positiveNumber"
+        },
         "maxFiveXxRate": {
           "$ref": "#/$defs/rate"
         }
