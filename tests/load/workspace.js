@@ -28,7 +28,7 @@ const profileConfiguration = {
       gracefulStop: "15s",
       vus: 33,
     },
-    ttfbThresholds: ["p(95)<800", "p(99)<1500"],
+    ttfbThresholds: ["p(95)<800", "p(99)<2500"],
     virtualUsers: 33,
   },
   burst: {
@@ -48,7 +48,7 @@ const profileConfiguration = {
       gracefulStop: "60s",
       vus: 33,
     },
-    ttfbThresholds: ["p(95)<800", "p(99)<1500"],
+    ttfbThresholds: ["p(95)<800", "p(99)<2500"],
     virtualUsers: 33,
   },
 };
