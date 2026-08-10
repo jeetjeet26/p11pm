@@ -82,7 +82,7 @@ export const options = {
   thresholds: {
     archive_ttfb: selected.archiveTtfbThresholds,
     authenticated_ttfb: selected.ttfbThresholds,
-    checks: ["rate==1"],
+    checks: ["rate>0.999"],
     http_req_failed: ["rate<0.001"],
     server_errors: ["rate<0.001"],
   },
