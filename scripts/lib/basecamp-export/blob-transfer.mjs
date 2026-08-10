@@ -109,6 +109,7 @@ export async function transferArchiveEntries({
       const activeBlobId = claimed.id ?? blobId;
       const writer = progressWriter(repository, activeBlobId);
       try {
+        let currentUploadUrl = resume ? claimed.upload_url ?? null : null;
         const upload = (uploadUrl) =>
           uploadStoredEntry({
             archive,
@@ -121,6 +122,7 @@ export async function transferArchiveEntries({
             uploadUrl,
             signal,
             onUploadUrl(nextUploadUrl) {
+              currentUploadUrl = nextUploadUrl;
               writer.write(
                 {
                   bytesUploaded: uploadUrl ? claimed.upload_offset ?? 0 : 0,
@@ -134,23 +136,51 @@ export async function transferArchiveEntries({
             },
           });
         let result;
-        try {
-          result = await upload(resume ? claimed.upload_url ?? null : null);
-        } catch (error) {
-          const status = responseStatus(error);
-          if (claimed.upload_url && (status === 404 || status === 410)) {
-            await repository.resetBlobUpload(activeBlobId);
-            result = await upload(null);
-          } else if (
-            status === 409 &&
-            (await repository.verifyBlobObject?.({
-              bucketId: bucketName,
-              objectPath,
-              sizeBytes: entry.sizeBytes,
-            }))
-          ) {
-            result = { uploadUrl: claimed.upload_url ?? null };
-          } else {
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            result = await upload(currentUploadUrl);
+            break;
+          } catch (error) {
+            const status = responseStatus(error);
+            if (status === 404 || status === 410) {
+              if (currentUploadUrl) {
+                await repository.resetBlobUpload(activeBlobId);
+                currentUploadUrl = null;
+              }
+              if (attempt < 5) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, 1_000 * 2 ** attempt),
+                );
+                continue;
+              }
+            }
+            if (status === 409) {
+              if (
+                await repository.verifyBlobObject?.({
+                  bucketId: bucketName,
+                  objectPath,
+                  sizeBytes: entry.sizeBytes,
+                })
+              ) {
+                result = { uploadUrl: currentUploadUrl };
+                break;
+              }
+              if (currentUploadUrl && attempt < 5) {
+                await new Promise((resolve) =>
+                  setTimeout(resolve, 1_000 * 2 ** attempt),
+                );
+                continue;
+              }
+            }
+            if (
+              attempt < 5 &&
+              (status === 429 || (status !== null && status >= 500))
+            ) {
+              await new Promise((resolve) =>
+                setTimeout(resolve, 1_000 * 2 ** attempt),
+              );
+              continue;
+            }
             throw error;
           }
         }
