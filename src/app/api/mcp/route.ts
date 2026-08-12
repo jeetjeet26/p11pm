@@ -1,4 +1,5 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
@@ -56,6 +57,49 @@ function database() {
   return client;
 }
 
+interface McpScope {
+  organizationId: string;
+  scopes: Set<string>;
+}
+
+const mcpScope = new AsyncLocalStorage<McpScope>();
+
+function currentScope() {
+  const scope = mcpScope.getStore();
+  if (!scope) throw new Error("MCP request scope is unavailable.");
+  return scope;
+}
+
+function requireScope(...allowed: string[]) {
+  const scope = currentScope();
+  if (!allowed.some((permission) => scope.scopes.has(permission))) {
+    throw new Error(`This token requires one of: ${allowed.join(", ")}.`);
+  }
+  return scope;
+}
+
+async function assertProjectScope(projectId: string) {
+  const { organizationId } = currentScope();
+  const { data, error } = await database()
+    .from("projects")
+    .select("id")
+    .eq("id", projectId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (error || !data) throw new Error("Project is outside this token's scope.");
+}
+
+async function scopedProjectIds() {
+  const { organizationId } = currentScope();
+  const { data, error } = await database()
+    .from("projects")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .limit(5_000);
+  if (error) throw error;
+  return (data ?? []).map((project) => project.id);
+}
+
 const handler = createMcpHandler(
   (server) => {
     server.registerTool(
@@ -70,11 +114,13 @@ const handler = createMcpHandler(
       },
       async ({ status, limit }) => {
         try {
+          const { organizationId } = requireScope("projects:read");
           let query = database()
             .from("projects")
             .select(
               "id,name,code,client_name,description,status,metadata,created_at,updated_at",
             )
+            .eq("organization_id", organizationId)
             .order("updated_at", { ascending: false })
             .limit(limit);
           if (status) query = query.eq("status", status);
@@ -99,6 +145,7 @@ const handler = createMcpHandler(
       },
       async ({ query, limit }) => {
         try {
+          const { organizationId } = requireScope("projects:read");
           const client = database();
           const fields =
             "id,name,code,client_name,description,status,metadata,updated_at";
@@ -106,12 +153,14 @@ const handler = createMcpHandler(
             client
               .from("projects")
               .select(fields)
+              .eq("organization_id", organizationId)
               .ilike("name", `%${query}%`)
               .order("updated_at", { ascending: false })
               .limit(limit),
             client
               .from("projects")
               .select(fields)
+              .eq("organization_id", organizationId)
               .ilike("description", `%${query}%`)
               .order("updated_at", { ascending: false })
               .limit(limit),
@@ -143,6 +192,10 @@ const handler = createMcpHandler(
       },
       async ({ projectId }) => {
         try {
+          const { organizationId } = requireScope(
+            "projects:read",
+            "issues:read",
+          );
           const client = database();
           const [
             { data: project, error: projectError },
@@ -153,6 +206,7 @@ const handler = createMcpHandler(
               .from("projects")
               .select("id,name,code,client_name,description,status,metadata,updated_at")
               .eq("id", projectId)
+              .eq("organization_id", organizationId)
               .single(),
             client
               .from("todos")
@@ -205,11 +259,16 @@ const handler = createMcpHandler(
       },
       async ({ projectId, assigneeId, status, limit }) => {
         try {
+          requireScope("issues:read");
+          const projectIds = await scopedProjectIds();
+          if (projectId) await assertProjectScope(projectId);
+          if (!projectIds.length) return textResult([]);
           let query = database()
             .from("todos")
             .select(
               "id,project_id,todo_list_id,title,description,status,priority,assigned_to,due_at,accelo_task_id,sync_status,updated_at,version",
             )
+            .in("project_id", projectIds)
             .order("due_at", { ascending: true, nullsFirst: false })
             .limit(limit);
           if (projectId) query = query.eq("project_id", projectId);
@@ -244,6 +303,8 @@ const handler = createMcpHandler(
       },
       async (input) => {
         try {
+          requireScope("issues:write");
+          await assertProjectScope(input.projectId);
           const { data, error } = await database().rpc("create_project_todo", {
             target_project_id: input.projectId,
             target_todo_list_id: input.listId ?? null,
@@ -310,6 +371,14 @@ const handler = createMcpHandler(
         ...input
       }) => {
         try {
+          requireScope("issues:write");
+          const { data: scopedTodo, error: scopeError } = await database()
+            .from("todos")
+            .select("project_id")
+            .eq("id", todoId)
+            .single<{ project_id: string }>();
+          if (scopeError) throw scopeError;
+          await assertProjectScope(scopedTodo.project_id);
           const updates: Record<string, unknown> = { ...input };
           if (assigneeId !== undefined) {
             updates.assignee_ids = assigneeId ? [assigneeId] : [];
@@ -352,6 +421,8 @@ const handler = createMcpHandler(
       },
       async (input) => {
         try {
+          requireScope("issues:write");
+          await assertProjectScope(input.projectId);
           const { data, error } = await database().rpc(
             "create_project_message",
             {
@@ -398,6 +469,7 @@ const handler = createMcpHandler(
       },
       async (input) => {
         try {
+          requireScope("issues:write");
           const targetTable =
             input.targetType === "todo"
               ? "todos"
@@ -410,6 +482,7 @@ const handler = createMcpHandler(
             .eq("id", input.targetId)
             .single<{ project_id: string }>();
           if (targetError) throw targetError;
+          await assertProjectScope(target.project_id);
 
           const { data, error } = await database().rpc(
             "create_project_comment",
@@ -449,6 +522,7 @@ const handler = createMcpHandler(
       },
       async ({ profileId, email, includeCompleted, limit }) => {
         try {
+          const { organizationId } = requireScope("issues:read");
           const client = database();
           let resolvedProfileId =
             profileId ?? process.env.MCP_DEFAULT_PROFILE_ID;
@@ -458,6 +532,7 @@ const handler = createMcpHandler(
             const { data: profile, error: profileError } = await client
               .from("profiles")
               .select("id")
+              .eq("organization_id", organizationId)
               .ilike("email", resolvedEmail)
               .maybeSingle<{ id: string }>();
             if (profileError) throw profileError;
@@ -469,6 +544,15 @@ const handler = createMcpHandler(
               "Provide profileId or email, or configure MCP_DEFAULT_PROFILE_ID/MCP_DEFAULT_USER_EMAIL.",
             );
           }
+          const { data: scopedProfile } = await client
+            .from("profiles")
+            .select("id")
+            .eq("id", resolvedProfileId)
+            .eq("organization_id", organizationId)
+            .maybeSingle();
+          if (!scopedProfile) throw new Error("Profile is outside this token's scope.");
+          const projectIds = await scopedProjectIds();
+          if (!projectIds.length) return textResult([]);
 
           let query = client
             .from("todos")
@@ -476,6 +560,7 @@ const handler = createMcpHandler(
               "id,project_id,todo_list_id,title,description,status,priority,due_at,updated_at,version",
             )
             .eq("assigned_to", resolvedProfileId)
+            .in("project_id", projectIds)
             .order("due_at", { ascending: true, nullsFirst: false })
             .limit(limit);
           if (!includeCompleted) {
@@ -506,19 +591,11 @@ function constantTimeEqual(left: string, right: string): boolean {
 }
 
 async function authenticatedHandler(request: Request): Promise<Response> {
-  const expectedKey = process.env.MCP_API_KEY;
-  if (!expectedKey) {
-    return Response.json(
-      { error: "MCP is not configured. Set MCP_API_KEY." },
-      { status: 503 },
-    );
-  }
-
   const authorization = request.headers.get("authorization");
   const suppliedKey = authorization?.match(/^Bearer\s+(.+)$/i)?.[1] ?? "";
-  if (!suppliedKey || !constantTimeEqual(suppliedKey, expectedKey)) {
+  if (!suppliedKey) {
     return Response.json(
-      { error: "A valid Bearer MCP_API_KEY is required." },
+      { error: "A valid scoped Bearer token is required." },
       {
         status: 401,
         headers: { "WWW-Authenticate": 'Bearer realm="P11 PM MCP"' },
@@ -526,7 +603,75 @@ async function authenticatedHandler(request: Request): Promise<Response> {
     );
   }
 
-  return handler(request);
+  const scope = await resolveMcpScope(suppliedKey);
+  if (!scope) {
+    return Response.json(
+      { error: "The Bearer token is invalid, expired, or revoked." },
+      {
+        status: 401,
+        headers: { "WWW-Authenticate": 'Bearer realm="P11 PM MCP"' },
+      },
+    );
+  }
+  return mcpScope.run(scope, () => handler(request));
+}
+
+async function resolveMcpScope(suppliedKey: string): Promise<McpScope | null> {
+  const client = getAppSupabaseClient();
+  if (!client) return null;
+  const expectedKey = process.env.MCP_API_KEY;
+  if (expectedKey && constantTimeEqual(suppliedKey, expectedKey)) {
+    const configuredOrganizationId = process.env.MCP_ORGANIZATION_ID;
+    if (configuredOrganizationId) {
+      return {
+        organizationId: configuredOrganizationId,
+        scopes: new Set([
+          "projects:read",
+          "issues:read",
+          "issues:write",
+          "chat:read",
+        ]),
+      };
+    }
+    const { data: organizations } = await client
+      .from("organizations")
+      .select("id")
+      .limit(2);
+    if (organizations?.length === 1) {
+      return {
+        organizationId: organizations[0].id,
+        scopes: new Set([
+          "projects:read",
+          "issues:read",
+          "issues:write",
+          "chat:read",
+        ]),
+      };
+    }
+    return null;
+  }
+
+  const tokenHash = createHash("sha256").update(suppliedKey).digest("hex");
+  const now = new Date().toISOString();
+  const { data: token, error } = await client
+    .from("integration_api_tokens")
+    .select("id,organization_id,scopes,expires_at,revoked_at")
+    .eq("token_hash", tokenHash)
+    .is("revoked_at", null)
+    .or(`expires_at.is.null,expires_at.gt.${now}`)
+    .maybeSingle();
+  if (error || !token) return null;
+  void client
+    .from("integration_api_tokens")
+    .update({ last_used_at: now })
+    .eq("id", token.id)
+    .then(({ error: updateError }) => {
+      if (updateError) console.warn("MCP token usage update failed:", updateError);
+    });
+  return {
+    organizationId: token.organization_id,
+    scopes: new Set(token.scopes ?? []),
+  };
 }
 
 export {

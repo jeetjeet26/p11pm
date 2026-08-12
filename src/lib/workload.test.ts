@@ -32,6 +32,25 @@ describe("executive workload scoring", () => {
     expect(getWorkload(work, now)).toBe("heavy");
   });
 
+  it("uses estimates instead of raw counts once estimates are adopted", () => {
+    const estimated = Array.from({ length: 8 }, () =>
+      todo({
+        estimatedMinutes: 60,
+      } as Partial<Todo> & { estimatedMinutes: number }),
+    );
+    expect(getWorkload(estimated, now)).toBe("light");
+    expect(
+      getWorkload(
+        [
+          todo({
+            estimatedMinutes: 1_800,
+          } as Partial<Todo> & { estimatedMinutes: number }),
+        ],
+        now,
+      ),
+    ).toBe("heavy");
+  });
+
   it("does not treat completed work as overdue", () => {
     expect(isOverdue(todo({ dueDate: "2026-08-01", status: "completed" }), now)).toBe(false);
   });

@@ -5,6 +5,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MessageItem } from "@/components/chat/message-item";
 import { AttachmentPicker } from "@/components/chat/attachment-picker";
+import {
+  EntityLinkPicker,
+  resolvePastedLink,
+} from "@/components/cross-links/entity-link-picker";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -20,6 +24,7 @@ import type {
   WorkspaceMessage,
   WorkspaceMessagePage,
 } from "@/lib/chat/types";
+import type { CrossLinkSearchResult } from "@/lib/cross-links/types";
 
 type ThreadResponse = WorkspaceMessagePage & {
   root?: WorkspaceMessage;
@@ -33,7 +38,9 @@ type MessageResponse = {
 
 export function ThreadPanel({
   conversationId,
+  currentProfileId,
   rootMessageId,
+  focusedMessageId,
   profiles,
   onClose,
   onReply,
@@ -41,7 +48,9 @@ export function ThreadPanel({
   syncEvent,
 }: {
   conversationId: string;
+  currentProfileId: string;
   rootMessageId: string;
+  focusedMessageId?: string;
   profiles: ChatProfile[];
   onClose: () => void;
   onReply: (message: WorkspaceMessage) => void;
@@ -55,6 +64,7 @@ export function ThreadPanel({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [body, setBody] = useState("");
   const [attachmentFiles, setAttachmentFiles] = useState<File[]>([]);
+  const [linkedWork, setLinkedWork] = useState<CrossLinkSearchResult[]>([]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -152,6 +162,13 @@ export function ThreadPanel({
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [replies]);
 
+  useEffect(() => {
+    if (!focusedMessageId) return;
+    document
+      .getElementById(`chat-message-${focusedMessageId}`)
+      ?.scrollIntoView({ block: "center" });
+  }, [focusedMessageId, replies]);
+
   const refreshForwardReplies = useCallback(
     function refreshForwardReplies(): Promise<void> {
       const pending = pendingForwardRefresh.current;
@@ -241,7 +258,7 @@ export function ThreadPanel({
   async function sendReply(event: React.FormEvent) {
     event.preventDefault();
     const trimmedBody = body.trim();
-    if ((!trimmedBody && !attachmentFiles.length) || sending) return;
+    if ((!trimmedBody && !attachmentFiles.length && !linkedWork.length) || sending) return;
     setSending(true);
     setError("");
     let attachmentIds: string[] = [];
@@ -260,6 +277,10 @@ export function ThreadPanel({
           body: trimmedBody,
           clientNonce: crypto.randomUUID(),
           attachmentIds,
+          workLinks: linkedWork.map((link) => ({
+            type: link.type,
+            id: link.id,
+          })),
         }),
       });
       const result = (await response.json()) as MessageResponse;
@@ -270,6 +291,7 @@ export function ThreadPanel({
         onReply(result.message);
         setBody("");
         setAttachmentFiles([]);
+        setLinkedWork([]);
         void postRead();
       } else {
         await removePendingChatAttachments(attachmentIds);
@@ -343,6 +365,7 @@ export function ThreadPanel({
           <>
             <MessageItem
               author={profileById.get(root.senderId)}
+              currentProfileId={currentProfileId}
               message={root}
             />
             <Separator className="my-5" />
@@ -365,6 +388,7 @@ export function ThreadPanel({
               {replies.map((reply) => (
                 <MessageItem
                   author={profileById.get(reply.senderId)}
+                  currentProfileId={currentProfileId}
                   key={reply.id}
                   message={reply}
                 />
@@ -396,6 +420,12 @@ export function ThreadPanel({
           onChange={setAttachmentFiles}
           onError={setError}
         />
+        <EntityLinkPicker
+          disabled={sending || !root}
+          onChange={setLinkedWork}
+          scope="work"
+          value={linkedWork}
+        />
         <form className="flex items-end gap-2" onSubmit={sendReply}>
           <Textarea
             aria-label="Reply in thread"
@@ -403,6 +433,19 @@ export function ThreadPanel({
             disabled={!root}
             maxLength={4000}
             onChange={(event) => setBody(event.target.value)}
+            onPaste={(event) => {
+              const pasted = event.clipboardData.getData("text");
+              void resolvePastedLink(pasted, "work").then((result) => {
+                if (
+                  result &&
+                  !linkedWork.some(
+                    (link) => link.type === result.type && link.id === result.id,
+                  )
+                ) {
+                  setLinkedWork([...linkedWork, result]);
+                }
+              });
+            }}
             onKeyDown={(event) => {
               if (
                 event.key === "Enter" &&
@@ -419,7 +462,9 @@ export function ThreadPanel({
           <Button
             aria-label="Send reply"
             disabled={
-              (!body.trim() && !attachmentFiles.length) || sending || !root
+              (!body.trim() && !attachmentFiles.length && !linkedWork.length) ||
+              sending ||
+              !root
             }
             size="icon"
             type="submit"

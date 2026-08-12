@@ -2,13 +2,17 @@ import type {
   ActivityEvent,
   ChatMessage,
   DocumentItem,
+  IssueStatusTransition,
   MessagePost,
   Milestone,
+  OperationalState,
   Profile,
   Project,
   Todo,
   TodoComment,
   TodoList,
+  TodoPriority,
+  TodoStatus,
   TodoSubtask,
 } from "@/lib/types";
 
@@ -23,9 +27,39 @@ export interface PositionCursor {
   id: string;
 }
 
+export interface IssueCursor {
+  rank: string;
+  issueNumber: string;
+  id: string;
+}
+
 export interface DueCursor {
   dueAt: string;
   id: string;
+}
+
+export type IssueDueState =
+  | "overdue"
+  | "due_today"
+  | "due_soon"
+  | "no_due_date"
+  | "has_due_date";
+
+export interface IssueListFilters {
+  statuses?: TodoStatus[];
+  priorities?: TodoPriority[];
+  labels?: string[];
+  assigneeId?: string;
+  unassigned?: boolean;
+  dueState?: IssueDueState;
+  text?: string;
+  operationalScope?: OperationalState[];
+}
+
+export interface ProjectIssuesQuery {
+  limit: number;
+  cursor?: IssueCursor;
+  filters?: IssueListFilters;
 }
 
 export interface ActivityFeedItem extends ActivityEvent {
@@ -78,9 +112,25 @@ export interface ProjectOverviewData {
 export interface ProjectTodosData {
   todoLists: TodoList[];
   todos: Todo[];
-  todoSubtasks: TodoSubtask[];
-  todoComments: TodoComment[];
-  nextCursor?: PositionCursor;
+  summary: {
+    totalCount: number;
+    activeCount: number;
+    triageCount: number;
+    historicalCount: number;
+    blockedCount: number;
+    overdueCount: number;
+  };
+  totalCount?: number;
+  hasMore?: boolean;
+  nextCursor?: string;
+  demoMode: boolean;
+}
+
+export interface IssueDetailData {
+  todo: Todo;
+  subtasks: TodoSubtask[];
+  comments: TodoComment[];
+  transitions: IssueStatusTransition[];
   demoMode: boolean;
 }
 

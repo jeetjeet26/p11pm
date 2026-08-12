@@ -26,6 +26,14 @@ export interface ViewerContext {
     slug: string;
   };
   role: ViewerRole;
+  capabilities: {
+    commercialRead: boolean;
+    commercialWrite: boolean;
+    timeApprove: boolean;
+    pipelineWrite: boolean;
+    supportRead: boolean;
+    supportWrite: boolean;
+  };
 }
 
 function isViewerRole(value: unknown): value is ViewerRole {
@@ -53,7 +61,7 @@ export const getViewer = cache(async (): Promise<ViewerContext | null> => {
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select(
-      "id,organization_id,email,full_name,title,avatar_url,role,status,organization:organizations!inner(id,name,slug)",
+      "id,organization_id,email,full_name,title,avatar_url,role,status,permissions,organization:organizations!inner(id,name,slug)",
     )
     .eq("id", userId)
     .eq("status", "active")
@@ -72,6 +80,14 @@ export const getViewer = cache(async (): Promise<ViewerContext | null> => {
     return null;
   }
 
+  const permissions =
+    profile.permissions &&
+    typeof profile.permissions === "object" &&
+    !Array.isArray(profile.permissions)
+      ? (profile.permissions as Record<string, unknown>)
+      : {};
+  const elevated = profile.role === "admin" || profile.role === "manager";
+
   return {
     user: {
       id: userId,
@@ -87,5 +103,18 @@ export const getViewer = cache(async (): Promise<ViewerContext | null> => {
     },
     organization,
     role: profile.role,
+    capabilities: {
+      commercialRead:
+        elevated || permissions["commercial.read"] === true,
+      commercialWrite:
+        elevated || permissions["commercial.write"] === true,
+      timeApprove: elevated || permissions["time.approve"] === true,
+      pipelineWrite: elevated || permissions["pipeline.write"] === true,
+      supportRead:
+        elevated ||
+        permissions["support.read"] === true ||
+        permissions["support.write"] === true,
+      supportWrite: elevated || permissions["support.write"] === true,
+    },
   };
 });

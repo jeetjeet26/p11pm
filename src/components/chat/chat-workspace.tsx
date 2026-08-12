@@ -14,6 +14,7 @@ import {
   UserRound,
 } from "lucide-react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useParams, useSearchParams } from "next/navigation";
 import {
   useCallback,
@@ -28,6 +29,10 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AttachmentPicker } from "@/components/chat/attachment-picker";
 import { MessageItem } from "@/components/chat/message-item";
 import { ThreadPanel } from "@/components/chat/thread-panel";
+import {
+  EntityLinkPicker,
+  resolvePastedLink,
+} from "@/components/cross-links/entity-link-picker";
 import {
   Avatar,
   AvatarFallback,
@@ -85,8 +90,15 @@ import {
   WorkspaceChatSyncController,
 } from "@/lib/chat/sync";
 import { canonicalGroupDmName } from "@/lib/chat/validation";
+import type { CrossLinkSearchResult } from "@/lib/cross-links/types";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+
+const ConversationBrief = dynamic(() =>
+  import("@/components/chat/conversation-brief").then(
+    (module) => module.ConversationBrief,
+  ),
+);
 
 type ConversationResponse = {
   conversation?: WorkspaceConversation;
@@ -287,6 +299,7 @@ export function ChatWorkspace({
   const [threadRootMessageId, setThreadRootMessageId] = useState<
     string | undefined
   >(() => searchParams.get("thread") ?? undefined);
+  const focusedMessageId = searchParams.get("message") ?? undefined;
   const [conversations, setConversations] = useState(() =>
     clearConversationUnread(
       initialData.conversations,
@@ -308,6 +321,9 @@ export function ChatWorkspace({
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [attachmentDrafts, setAttachmentDrafts] = useState<
     Record<string, File[]>
+  >({});
+  const [linkDrafts, setLinkDrafts] = useState<
+    Record<string, CrossLinkSearchResult[]>
   >({});
   const [sending, setSending] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -351,6 +367,7 @@ export function ChatWorkspace({
   const shouldScrollToBottom = useRef(true);
   const seenThreadReplyIds = useRef(new Set<string>());
   const bootstrapRequestId = useRef(0);
+  const focusedLookupPages = useRef(0);
   const currentProfileId = initialData.currentProfile.id;
   const selectedMessagePage = messageCache[selectedConversationId];
   const messages = useMemo(
@@ -360,6 +377,33 @@ export function ChatWorkspace({
   const hasMoreMessages = selectedMessagePage?.hasMore ?? false;
   const messageBody = drafts[selectedConversationId] ?? "";
   const attachmentFiles = attachmentDrafts[selectedConversationId] ?? [];
+  const linkedWork = linkDrafts[selectedConversationId] ?? [];
+
+  useEffect(() => {
+    if (!focusedMessageId || threadRootMessageId) return;
+    const target = document.getElementById(`chat-message-${focusedMessageId}`);
+    if (target) {
+      target.scrollIntoView({ block: "center" });
+      focusedLookupPages.current = 0;
+      return;
+    }
+    if (
+      hasMoreMessages &&
+      !loadingOlder &&
+      focusedLookupPages.current < 20
+    ) {
+      focusedLookupPages.current += 1;
+      void loadOlderMessages();
+    }
+    // loadOlderMessages is intentionally page-driven by the message cache.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    focusedMessageId,
+    hasMoreMessages,
+    loadingOlder,
+    messages,
+    threadRootMessageId,
+  ]);
 
   const updateMessageCache = useCallback(
     (
@@ -573,6 +617,16 @@ export function ChatWorkspace({
       setAttachmentDrafts((current) => ({
         ...current,
         [selectedConversationId]: files,
+      }));
+    },
+    [selectedConversationId],
+  );
+
+  const setLinkedWork = useCallback(
+    (links: CrossLinkSearchResult[]) => {
+      setLinkDrafts((current) => ({
+        ...current,
+        [selectedConversationId]: links,
       }));
     },
     [selectedConversationId],
@@ -1151,7 +1205,7 @@ export function ChatWorkspace({
     event.preventDefault();
     const conversationId = selectedConversationId;
     const body = messageBody.trim();
-    if ((!body && !attachmentFiles.length) || sending) return;
+    if ((!body && !attachmentFiles.length && !linkedWork.length) || sending) return;
     setSending(true);
     setError("");
     const clientNonce = crypto.randomUUID();
@@ -1170,6 +1224,10 @@ export function ChatWorkspace({
           body,
           clientNonce,
           attachmentIds,
+          workLinks: linkedWork.map((link) => ({
+            type: link.type,
+            id: link.id,
+          })),
         }),
       });
       const result = (await response.json()) as MessageResponse;
@@ -1195,6 +1253,7 @@ export function ChatWorkspace({
           ...current,
           [conversationId]: [],
         }));
+        setLinkDrafts((current) => ({ ...current, [conversationId]: [] }));
       } else {
         await removePendingChatAttachments(attachmentIds);
         setError(result.error ?? "Could not send the message.");
@@ -1414,6 +1473,7 @@ export function ChatWorkspace({
                   : selectedCounterpart?.title || selectedCounterpart?.email}
             </p>
           </div>
+          <ConversationBrief conversationId={selectedConversation.id} />
           {selectedConversation.kind === "channel" &&
             selectedConversation.visibility === "private" &&
             selectedConversation.canManage && (
@@ -1523,6 +1583,7 @@ export function ChatWorkspace({
                 {messages.map((message) => (
                   <MessageItem
                     author={profileById.get(message.senderId)}
+                    currentProfileId={currentProfileId}
                     key={message.id}
                     message={message}
                     onOpenThread={() => {
@@ -1554,12 +1615,31 @@ export function ChatWorkspace({
               onChange={setAttachmentFiles}
               onError={setError}
             />
+            <EntityLinkPicker
+              disabled={sending}
+              onChange={setLinkedWork}
+              scope="work"
+              value={linkedWork}
+            />
             <form className="flex items-end gap-2" onSubmit={sendMessage}>
               <Textarea
                 aria-label={`Message ${selectedName}`}
                 className="max-h-40 min-h-11 resize-none py-2.5"
                 maxLength={4000}
                 onChange={(event) => setMessageBody(event.target.value)}
+                onPaste={(event) => {
+                  const pasted = event.clipboardData.getData("text");
+                  void resolvePastedLink(pasted, "work").then((result) => {
+                    if (
+                      result &&
+                      !linkedWork.some(
+                        (link) => link.type === result.type && link.id === result.id,
+                      )
+                    ) {
+                      setLinkedWork([...linkedWork, result]);
+                    }
+                  });
+                }}
                 onKeyDown={(event) => {
                   if (
                     event.key === "Enter" &&
@@ -1581,7 +1661,10 @@ export function ChatWorkspace({
               <Button
                 aria-label="Send message"
                 disabled={
-                  sending || (!messageBody.trim() && !attachmentFiles.length)
+                  sending ||
+                  (!messageBody.trim() &&
+                    !attachmentFiles.length &&
+                    !linkedWork.length)
                 }
                 size="icon"
                 type="submit"
@@ -1603,6 +1686,7 @@ export function ChatWorkspace({
       {threadRootMessageId && (
         <ThreadPanel
           conversationId={selectedConversationId}
+          currentProfileId={currentProfileId}
           key={threadRootMessageId}
           onClose={() => {
             setThreadRootMessageId(undefined);
@@ -1615,6 +1699,7 @@ export function ChatWorkspace({
           onReply={applyThreadReply}
           onThreadRead={setThreadRead}
           profiles={profiles}
+          focusedMessageId={focusedMessageId}
           rootMessageId={threadRootMessageId}
           syncEvent={threadSyncEvent}
         />

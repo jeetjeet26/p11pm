@@ -57,7 +57,9 @@ function message(
     replyCount: 0,
     threadUnreadCount: 0,
     attachments: [],
+    links: [],
     ...overrides,
+    signals: overrides.signals ?? [],
   };
 }
 

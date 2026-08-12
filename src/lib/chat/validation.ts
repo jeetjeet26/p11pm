@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { workLinkKinds } from "@/lib/cross-links/types";
+
 const uuidSchema = z.string().uuid();
 
 export const channelNameSchema = z
@@ -32,6 +34,16 @@ export const updateWorkspaceProfileSchema = z.object({
   role: z.enum(["admin", "manager", "member", "viewer"]),
   status: z.enum(["active", "suspended", "deactivated"]),
   chatEnabled: z.boolean(),
+  permissions: z
+    .object({
+      commercialRead: z.boolean(),
+      commercialWrite: z.boolean(),
+      timeApprove: z.boolean(),
+      pipelineWrite: z.boolean(),
+      supportRead: z.boolean(),
+      supportWrite: z.boolean(),
+    })
+    .optional(),
 });
 
 export const createMessageSchema = z
@@ -44,10 +56,20 @@ export const createMessageSchema = z
     clientNonce: uuidSchema,
     parentMessageId: uuidSchema.optional(),
     attachmentIds: z.array(uuidSchema).max(5).default([]),
+    workLinks: z
+      .array(
+        z.object({
+          type: z.enum(workLinkKinds),
+          id: uuidSchema,
+        }),
+      )
+      .max(20)
+      .default([]),
   })
   .refine(
-    ({ body, attachmentIds }) => Boolean(body) || attachmentIds.length > 0,
-    "Enter a message or attach a file.",
+    ({ body, attachmentIds, workLinks }) =>
+      Boolean(body) || attachmentIds.length > 0 || workLinks.length > 0,
+    "Enter a message, attach a file, or link work.",
   );
 
 export const uploadAttachmentSchema = z.object({

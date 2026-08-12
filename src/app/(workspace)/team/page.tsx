@@ -6,6 +6,7 @@ export const metadata = { title: "Team view" };
 
 export default async function TeamPage() {
   const data = await getTeamData();
+
   return (
     <div className="space-y-7">
       <header>

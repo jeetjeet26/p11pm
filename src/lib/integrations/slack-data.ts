@@ -13,6 +13,7 @@ interface ProjectRow {
 interface ProfileRow {
   id: string;
   full_name: string | null;
+  organization_id: string;
 }
 
 interface TodoRow {
@@ -41,9 +42,11 @@ function isUuid(value: string): boolean {
 
 export async function findProject(reference: string): Promise<ProjectRow> {
   const client = database();
+  const organizationId = await slackOrganizationId();
   let query = client
     .from("projects")
     .select("id,name,status,description")
+    .eq("organization_id", organizationId)
     .limit(1);
 
   query = isUuid(reference)
@@ -61,9 +64,11 @@ export async function findProject(reference: string): Promise<ProjectRow> {
 async function findSlackProfile(
   slackUserId: string,
 ): Promise<ProfileRow | null> {
+  const organizationId = await slackOrganizationId();
   const { data, error } = await database()
     .from("profiles")
-    .select("id,full_name")
+    .select("id,full_name,organization_id")
+    .eq("organization_id", organizationId)
     .contains("preferences", { slack_user_id: slackUserId })
     .maybeSingle<ProfileRow>();
 
@@ -107,14 +112,23 @@ export async function formatMyTasks(slackUserId: string): Promise<string> {
     return "Your Slack account is not linked to a P11 PM profile.";
   }
 
-  const { data, error } = await client
+  const { data: assignments, error: assignmentsError } = await client
+    .from("todo_assignees")
+    .select("todo_id")
+    .eq("profile_id", profile.id)
+    .limit(2_000);
+  if (assignmentsError) throw assignmentsError;
+  const assignedIds = (assignments ?? []).map((assignment) => assignment.todo_id);
+  let query = client
     .from("todos")
     .select("id,project_id,title,status,due_at")
-    .eq("assigned_to", profile.id)
     .not("status", "in", '("done","cancelled")')
     .order("due_at", { ascending: true, nullsFirst: false })
-    .limit(20)
-    .returns<TodoRow[]>();
+    .limit(20);
+  query = assignedIds.length
+    ? query.or(`assigned_to.eq.${profile.id},id.in.(${assignedIds.join(",")})`)
+    : query.eq("assigned_to", profile.id);
+  const { data, error } = await query.returns<TodoRow[]>();
   if (error) throw error;
   if (!data?.length) return "You have no open P11 PM tasks.";
 
@@ -122,6 +136,7 @@ export async function formatMyTasks(slackUserId: string): Promise<string> {
   const { data: projects, error: projectsError } = await client
     .from("projects")
     .select("id,name")
+    .eq("organization_id", profile.organization_id)
     .in("id", projectIds)
     .returns<Array<{ id: string; name: string }>>();
   if (projectsError) throw projectsError;
@@ -135,6 +150,22 @@ export async function formatMyTasks(slackUserId: string): Promise<string> {
   });
 
   return `*${profile.full_name ?? "Your"} open tasks*\n${lines.join("\n")}`;
+}
+
+async function slackOrganizationId() {
+  const configured = process.env.SLACK_ORGANIZATION_ID;
+  if (configured) return configured;
+  const { data, error } = await database()
+    .from("organizations")
+    .select("id")
+    .limit(2);
+  if (error) throw error;
+  if (data?.length !== 1) {
+    throw new Error(
+      "Set SLACK_ORGANIZATION_ID when more than one organization exists.",
+    );
+  }
+  return data[0].id;
 }
 
 export async function formatProjectStatus(

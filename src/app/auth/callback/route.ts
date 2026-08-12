@@ -8,6 +8,7 @@ const allowedOtpTypes = new Set<EmailOtpType>([
   "email",
   "invite",
   "magiclink",
+  "recovery",
   "signup",
 ]);
 
@@ -59,6 +60,10 @@ export async function GET(request: Request) {
             fullName,
           );
         }
+
+        const passwordUrl = new URL("/reset-password", request.url);
+        passwordUrl.searchParams.set("next", next);
+        return NextResponse.redirect(passwordUrl);
       }
 
       return NextResponse.redirect(new URL(next, request.url));

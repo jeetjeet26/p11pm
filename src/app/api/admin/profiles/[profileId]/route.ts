@@ -28,12 +28,23 @@ export async function PATCH(
     const { profileId } = await params;
     const context = await requireWorkspaceAdminContext();
     const { error } = await context.supabase.rpc(
-      "update_workspace_profile_admin",
+      "update_workspace_profile_admin_v2",
       {
         target_profile_id: profileId,
         target_role: parsed.data.role,
         target_status: parsed.data.status,
         target_chat_enabled: parsed.data.chatEnabled,
+        target_permissions: {
+          "commercial.read":
+            parsed.data.permissions?.commercialRead ?? false,
+          "commercial.write":
+            parsed.data.permissions?.commercialWrite ?? false,
+          "time.approve": parsed.data.permissions?.timeApprove ?? false,
+          "pipeline.write":
+            parsed.data.permissions?.pipelineWrite ?? false,
+          "support.read": parsed.data.permissions?.supportRead ?? false,
+          "support.write": parsed.data.permissions?.supportWrite ?? false,
+        },
       },
     );
     if (error) {

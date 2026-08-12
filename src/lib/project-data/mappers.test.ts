@@ -29,7 +29,7 @@ describe("bounded project data mappers", () => {
     ).toMatchObject({
       id: "todo-1",
       status: "completed",
-      priority: "high",
+      priority: "urgent",
       dueDate: "2026-08-12",
       assigneeIds: ["profile-1", "profile-2"],
       completionSubscriberIds: ["profile-3"],
@@ -37,13 +37,40 @@ describe("bounded project data mappers", () => {
     });
   });
 
-  it("normalizes database-only project statuses for the UI", () => {
+  it("preserves project workflow semantics for issue-first views", () => {
     expect(mapProject({ id: "p1", status: "planning", metadata: {} }).status).toBe(
-      "on_hold",
+      "planning",
     );
     expect(mapProject({ id: "p2", status: "cancelled", metadata: {} }).status).toBe(
-      "completed",
+      "cancelled",
     );
+  });
+
+  it("maps first-class client and commercial project fields", () => {
+    expect(
+      mapProject({
+        id: "p-commercial",
+        client_id: "client-1",
+        client_name: "Aster House",
+        billing_type: "fixed_fee",
+        fixed_fee_cents: 1250000,
+        commercial_value_cents: 1500000,
+        billing_cadence: "milestone",
+        commercial_currency: "USD",
+        accelo_job_id: "accelo-job-42",
+        status: "active",
+        metadata: {},
+      }),
+    ).toMatchObject({
+      clientId: "client-1",
+      client: "Aster House",
+      billingType: "fixed_fee",
+      fixedFee: 12500,
+      commercialValue: 15000,
+      billingCadence: "milestone",
+      currency: "USD",
+      acceloJobId: "accelo-job-42",
+    });
   });
 
   it("maps route-specific keyset cursors", () => {

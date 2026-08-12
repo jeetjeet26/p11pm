@@ -10,6 +10,14 @@
     {
       "path": "/api/cron/cleanup",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/operations",
+      "schedule": "15 * * * *"
+    },
+    {
+      "path": "/api/cron/accelo",
+      "schedule": "45 * * * *"
     }
   ]
 }

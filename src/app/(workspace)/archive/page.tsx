@@ -37,6 +37,8 @@ export default async function ArchivePage({
   const data = await getArchiveIndexData({
     query: search,
     recordType: recordType && recordType !== "all" ? recordType : undefined,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
   });
   const progress = data.progress;
 

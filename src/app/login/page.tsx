@@ -61,7 +61,7 @@ export default function LoginPage() {
             <div>
               <CardTitle className="text-2xl">Welcome back</CardTitle>
               <CardDescription className="mt-2">
-                Sign in with your invited P11 account.
+                Sign in with your work email and password.
               </CardDescription>
             </div>
           </CardHeader>

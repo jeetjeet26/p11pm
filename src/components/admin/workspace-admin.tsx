@@ -169,11 +169,13 @@ function AdminProfileRow({
   const [role, setRole] = useState(profile.role);
   const [status, setStatus] = useState(profile.status);
   const [chatEnabled, setChatEnabled] = useState(profile.chatEnabled);
+  const [permissions, setPermissions] = useState(profile.permissions);
   const [saving, setSaving] = useState(false);
   const changed =
     role !== profile.role ||
     status !== profile.status ||
-    chatEnabled !== profile.chatEnabled;
+    chatEnabled !== profile.chatEnabled ||
+    JSON.stringify(permissions) !== JSON.stringify(profile.permissions);
 
   async function save() {
     if (!changed || saving) return;
@@ -182,11 +184,11 @@ function AdminProfileRow({
     const response = await fetch(`/api/admin/profiles/${profile.id}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role, status, chatEnabled }),
+      body: JSON.stringify({ role, status, chatEnabled, permissions }),
     });
     const result = (await response.json()) as { error?: string };
     if (response.ok) {
-      onSaved({ ...profile, role, status, chatEnabled });
+      onSaved({ ...profile, role, status, chatEnabled, permissions });
     } else {
       onError(result.error ?? "Could not update the workspace profile.");
     }
@@ -250,6 +252,37 @@ function AdminProfileRow({
         {saving ? <LoaderCircle className="animate-spin" /> : <Save />}
         Save
       </Button>
+      <div className="flex flex-wrap gap-x-5 gap-y-2 md:col-span-5">
+        {[
+          ["commercialRead", "View commercial data"],
+          ["commercialWrite", "Manage commercial data"],
+          ["timeApprove", "Approve time"],
+          ["pipelineWrite", "Manage pipeline"],
+          ["supportRead", "View support"],
+          ["supportWrite", "Manage support"],
+        ].map(([key, label]) => (
+          <label className="flex items-center gap-2 text-xs" key={key}>
+            <Checkbox
+              checked={permissions[key as keyof typeof permissions]}
+              disabled={saving || role === "admin"}
+              onCheckedChange={(checked) =>
+                setPermissions((current) => ({
+                  ...current,
+                  [key]: checked === true,
+                }))
+              }
+            />
+            {label}
+          </label>
+        ))}
+        {role === "admin" || role === "manager" ? (
+          <span className="text-xs text-muted-foreground">
+            {role === "admin"
+              ? "Administrators always have every capability."
+              : "Managers retain commercial, approval, pipeline, and support access by default."}
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }

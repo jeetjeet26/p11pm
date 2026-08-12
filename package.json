@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20.9.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
     "dev": "next dev",
@@ -20,11 +20,17 @@
     "test:load:smoke": "k6 run tests/load/smoke.js",
     "test:load:workspace": "k6 run tests/load/workspace.js",
     "db:reset": "supabase db reset",
+    "db:types": "supabase gen types --local --schema public > src/lib/supabase/database.types.ts",
     "check:route-budgets": "node scripts/check-route-budgets.mjs",
     "check:budgets": "npm run check:route-budgets",
     "evidence:release": "node scripts/generate-release-evidence.mjs",
+    "authorize:dropbox": "node scripts/authorize-dropbox.mjs",
     "import:basecamp": "node scripts/import-basecamp.mjs",
     "import:basecamp-export": "node scripts/import-basecamp-export.mjs",
+    "import:dropbox": "node scripts/import-dropbox.mjs",
+    "export:organization": "node scripts/export-organization.mjs",
+    "verify:organization-export": "node scripts/verify-organization-export.mjs",
+    "verify:backup-evidence": "node scripts/verify-backup-evidence.mjs",
     "provision:chat-users": "node scripts/provision-p11-chat-users.mjs",
     "check": "npm run lint && npm run typecheck && npm run test && npm run build && npm run check:route-budgets"
   },
@@ -40,6 +46,7 @@
     "@vercel/analytics": "^2.0.1",
     "@vercel/otel": "^2.1.3",
     "@vercel/speed-insights": "^2.0.0",
+    "ai": "^7.0.59",
     "cheerio": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

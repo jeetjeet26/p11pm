@@ -1,19 +1,25 @@
 import type {
   ActivityFeedItem,
   DueCursor,
+  IssueCursor,
   PositionCursor,
   TimestampCursor,
 } from "@/lib/project-data/contracts";
 import type {
   ChatMessage,
   DocumentItem,
+  IssueStatusTransition,
+  IssueType,
   MessagePost,
   Milestone,
+  OperationalState,
   Profile,
   Project,
   Todo,
   TodoComment,
   TodoList,
+  TodoPriority,
+  TodoStatus,
   TodoSubtask,
 } from "@/lib/types";
 
@@ -37,6 +43,14 @@ export function asNumber(value: unknown, fallback = 0): number {
     return Number(value);
   }
   return fallback;
+}
+
+export function asOptionalNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
+    return Number(value);
+  }
+  return undefined;
 }
 
 export function asStrings(value: unknown): string[] {
@@ -79,6 +93,11 @@ export function mapProfile(value: unknown): Profile {
       ? String(preferences.accelo_staff_id)
       : undefined,
     slackUserId: asString(preferences.slack_user_id) || undefined,
+    timeZone: asString(row.timezone) || undefined,
+    weeklyCapacityMinutes:
+      typeof row.weekly_capacity_minutes === "number"
+        ? row.weekly_capacity_minutes
+        : undefined,
   };
 }
 
@@ -86,22 +105,74 @@ export function mapProject(value: unknown): Project {
   const row = asRecord(value);
   const metadata = asRecord(row.metadata);
   const sourceStatus = asString(row.status, "active");
-  const status: Project["status"] =
-    sourceStatus === "completed" || sourceStatus === "cancelled"
-      ? "completed"
-      : sourceStatus === "on_hold" || sourceStatus === "planning"
-        ? "on_hold"
-        : "active";
+  const status: Project["status"] = [
+    "planning",
+    "active",
+    "on_hold",
+    "completed",
+    "cancelled",
+  ].includes(sourceStatus)
+    ? (sourceStatus as Project["status"])
+    : "active";
+  const priority = mapTodoPriority(row.priority);
   return {
     id: asString(row.id),
     name: asString(row.name),
     client: asString(row.client_name, "P11 client"),
+    clientId: asString(row.client_id) || undefined,
     description: asString(row.description),
     status,
+    code: asString(row.code) || undefined,
+    ownerId: asString(row.owner_id) || undefined,
+    priority,
+    startDate: asString(row.start_date).slice(0, 10) || undefined,
+    dueDate: asString(row.due_date).slice(0, 10) || undefined,
+    budget: asOptionalNumber(row.budget),
+    currency:
+      asString(row.commercial_currency) || asString(row.currency) || undefined,
+    billingType:
+      row.billing_type === "fixed_fee" || row.billing_type === "internal"
+        ? row.billing_type
+        : "time_and_materials",
+    fixedFee:
+      asOptionalNumber(row.fixed_fee_cents) === undefined
+        ? undefined
+        : Number(row.fixed_fee_cents) / 100,
+    hourlyRate:
+      asOptionalNumber(row.hourly_rate_cents) === undefined
+        ? undefined
+        : Number(row.hourly_rate_cents) / 100,
+    billingCap:
+      asOptionalNumber(row.billing_cap_cents) === undefined
+        ? undefined
+        : Number(row.billing_cap_cents) / 100,
+    commercialValue:
+      asOptionalNumber(row.commercial_value_cents) === undefined
+        ? undefined
+        : Number(row.commercial_value_cents) / 100,
+    billingCadence:
+      row.billing_cadence === "weekly" ||
+      row.billing_cadence === "monthly" ||
+      row.billing_cadence === "quarterly" ||
+      row.billing_cadence === "milestone" ||
+      row.billing_cadence === "completion"
+        ? row.billing_cadence
+        : undefined,
+    timeRoundingMinutes:
+      row.time_rounding_minutes === 1 ||
+      row.time_rounding_minutes === 5 ||
+      row.time_rounding_minutes === 6 ||
+      row.time_rounding_minutes === 10 ||
+      row.time_rounding_minutes === 15 ||
+      row.time_rounding_minutes === 30 ||
+      row.time_rounding_minutes === 60
+        ? row.time_rounding_minutes
+        : undefined,
+    archivedAt: asString(row.archived_at) || undefined,
     color: asString(metadata.color, "bg-sky-500"),
-    acceloJobId: metadata.accelo_job_id
-      ? String(metadata.accelo_job_id)
-      : undefined,
+    acceloJobId:
+      asString(row.accelo_job_id) ||
+      (metadata.accelo_job_id ? String(metadata.accelo_job_id) : undefined),
     slackChannel:
       asString(metadata.slack_channel_name) ||
       asString(metadata.slack_channel) ||
@@ -118,26 +189,61 @@ export function mapProject(value: unknown): Project {
 
 export function mapTodoList(value: unknown): TodoList {
   const row = asRecord(value);
+  const issueCount = asOptionalNumber(row.issue_count);
   return {
     id: asString(row.id),
     projectId: asString(row.project_id),
     name: asString(row.title),
     position: asNumber(row.position),
+    ...(issueCount === undefined ? {} : { issueCount }),
   };
+}
+
+export function mapTodoStatus(value: unknown): TodoStatus {
+  const statusMap: Record<string, TodoStatus> = {
+    todo: "open",
+    open: "open",
+    in_progress: "in_progress",
+    blocked: "blocked",
+    review: "review",
+    done: "completed",
+    completed: "completed",
+    cancelled: "cancelled",
+  };
+  return statusMap[asString(value, "todo")] ?? "open";
+}
+
+function mapTodoPriority(value: unknown): TodoPriority {
+  const priority = asString(value, "medium");
+  return priority === "low" ||
+    priority === "medium" ||
+    priority === "high" ||
+    priority === "urgent"
+    ? priority
+    : "medium";
+}
+
+function mapIssueType(value: unknown): IssueType {
+  const issueType = asString(value, "task");
+  return issueType === "story" || issueType === "bug" || issueType === "epic"
+    ? issueType
+    : "task";
+}
+
+function mapOperationalState(value: unknown): OperationalState {
+  const operationalState = asString(value, "active");
+  return operationalState === "triage" || operationalState === "historical"
+    ? operationalState
+    : "active";
 }
 
 export function mapTodo(value: unknown): Todo {
   const row = asRecord(value);
-  const statusMap: Record<string, Todo["status"]> = {
-    todo: "open",
-    in_progress: "in_progress",
-    blocked: "blocked",
-    review: "in_progress",
-    done: "completed",
-    cancelled: "completed",
-  };
-  const sourcePriority = asString(row.priority, "medium");
   const assigneeIds = asStrings(row.assignee_ids);
+  const issueNumber = asOptionalNumber(row.issue_number);
+  const rank = asOptionalNumber(row.rank);
+  const estimatedMinutes = asOptionalNumber(row.estimated_minutes);
+  const actualMinutes = asOptionalNumber(row.actual_minutes);
   return {
     id: asString(row.id),
     projectId: asString(row.project_id),
@@ -149,14 +255,25 @@ export function mapTodo(value: unknown): Todo {
     completionSubscriberIds: asStrings(row.completion_subscriber_ids),
     dueDate:
       (asString(row.due_on) || asString(row.due_at)).slice(0, 10) || undefined,
-    status: statusMap[asString(row.status, "todo")] ?? "open",
-    priority:
-      sourcePriority === "medium"
-        ? "normal"
-        : sourcePriority === "urgent"
-          ? "high"
-          : (sourcePriority as Todo["priority"]),
+    status: mapTodoStatus(row.status),
+    priority: mapTodoPriority(row.priority),
+    issueKey: asString(row.issue_key) || undefined,
+    issueNumber,
+    issueType: mapIssueType(row.issue_type),
+    rank,
+    operationalState: mapOperationalState(row.operational_state),
+    labels: asStrings(row.labels),
+    estimatedMinutes,
+    actualMinutes,
+    milestoneId: asString(row.milestone_id) || undefined,
+    cycleId: asString(row.cycle_id) || undefined,
+    riskLevel:
+      (asString(row.risk_level, "none") as Todo["riskLevel"]) ?? "none",
+    riskReason: asString(row.risk_reason) || undefined,
     acceloTaskId: row.accelo_task_id ? String(row.accelo_task_id) : undefined,
+    createdAt: asString(row.created_at, new Date(0).toISOString()),
+    completedAt: asString(row.completed_at) || undefined,
+    sourceCreatedAt: asString(row.source_created_at) || undefined,
     updatedAt: asString(row.updated_at, new Date(0).toISOString()),
     version: asNumber(row.version, 1),
   };
@@ -197,6 +314,19 @@ export function mapComment(value: unknown): TodoComment {
   };
 }
 
+export function mapIssueTransition(value: unknown): IssueStatusTransition {
+  const row = asRecord(value);
+  return {
+    id: asString(row.id),
+    todoId: asString(row.todo_id),
+    fromStatus: mapTodoStatus(row.from_status),
+    toStatus: mapTodoStatus(row.to_status),
+    actorId: asString(row.actor_id) || undefined,
+    issueVersion: asNumber(row.issue_version, 1),
+    createdAt: asString(row.created_at, new Date(0).toISOString()),
+  };
+}
+
 export function mapMessage(value: unknown): MessagePost {
   const row = asRecord(value);
   return {
@@ -220,7 +350,14 @@ export function mapMilestone(value: unknown): Milestone {
     id: asString(row.id),
     projectId: asString(row.project_id),
     title: asString(row.name),
+    description: asString(row.description) || undefined,
+    status: asString(row.status, "planned") as Milestone["status"],
+    ownerId: asString(row.owner_id) || undefined,
+    completedAt: asString(row.completed_at) || undefined,
     dueDate: asString(row.due_date),
+    position: asOptionalNumber(row.position),
+    riskLevel: asString(row.risk_level, "none") as Milestone["riskLevel"],
+    riskReason: asString(row.risk_reason) || undefined,
     acceloMilestoneId: row.accelo_milestone_id
       ? String(row.accelo_milestone_id)
       : undefined,
@@ -264,6 +401,9 @@ export function mapActivity(value: unknown): ActivityFeedItem {
     actorId: asString(row.actor_id),
     verb: asString(row.action),
     object: asString(row.summary, "Project activity"),
+    entityType: asString(row.entity_type) || undefined,
+    entityId: asString(row.entity_id) || undefined,
+    metadata: asRecord(row.metadata),
     createdAt: asString(row.created_at),
     actorName,
     actorInitials: initials(actorName),
@@ -291,6 +431,14 @@ export function mapPositionCursor(value: unknown): PositionCursor | undefined {
         id,
       }
     : undefined;
+}
+
+export function mapIssueCursor(value: unknown): IssueCursor | undefined {
+  const row = asRecord(value);
+  const rank = asString(row.rank);
+  const issueNumber = asString(row.issue_number);
+  const id = asString(row.id);
+  return rank && issueNumber && id ? { rank, issueNumber, id } : undefined;
 }
 
 export function mapDueCursor(value: unknown): DueCursor | undefined {

@@ -2,7 +2,10 @@ export const MAX_UPLOAD_SIZE = 25 * 1024 * 1024;
 export const TUS_CHUNK_SIZE = 6 * 1024 * 1024;
 export const UPLOAD_RETRY_DELAYS = [0, 3_000, 5_000, 10_000, 20_000];
 
-export type UploadTargetKind = "project_file" | "chat_attachment";
+export type UploadTargetKind =
+  | "project_file"
+  | "workspace_file"
+  | "chat_attachment";
 export type UploadReservationStatus = "pending" | "finalized" | "failed";
 
 export interface UploadResource {
@@ -63,6 +66,10 @@ export function getDirectStorageEndpoint(supabaseUrl: string): string {
   }
 
   return `${url.origin}/storage/v1/upload/resumable`;
+}
+
+export function getSignedStorageEndpoint(supabaseUrl: string): string {
+  return `${getDirectStorageEndpoint(supabaseUrl)}/sign`;
 }
 
 export function uploadCacheKey(

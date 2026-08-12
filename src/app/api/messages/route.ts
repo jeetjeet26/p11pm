@@ -40,6 +40,7 @@ const payloadSchema = z.discriminatedUnion("type", [
 
 const querySchema = z.object({
   projectId: z.string().min(1),
+  messageId: z.string().uuid().optional(),
 });
 
 function rpcErrorStatus(error: { code?: string }): number {
@@ -56,6 +57,32 @@ export async function GET(request: Request) {
     return Response.json({ error: parsed.error.issues[0]?.message }, { status: 400 });
   }
   try {
+    if (parsed.data.messageId) {
+      const supabase = await createClient();
+      if (!supabase) {
+        return Response.json({ error: "Supabase is not configured." }, { status: 503 });
+      }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+      const { data, error } = await supabase
+        .from("comments")
+        .select("id,author_id,body,created_at,updated_at,is_edited")
+        .eq("project_id", parsed.data.projectId)
+        .eq("metadata->>message_id", parsed.data.messageId)
+        .order("created_at");
+      if (error) throw error;
+      return Response.json({
+        comments: (data ?? []).map((comment) => ({
+          id: comment.id,
+          authorId: comment.author_id,
+          body: comment.body,
+          createdAt: comment.created_at,
+          editedAt: comment.is_edited ? comment.updated_at : undefined,
+        })),
+      });
+    }
     return Response.json(await getProjectMessagesData(parsed.data.projectId));
   } catch (error) {
     console.error("Load project messages failed:", error);

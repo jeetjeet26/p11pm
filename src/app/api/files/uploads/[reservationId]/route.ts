@@ -8,6 +8,12 @@ import {
   uploadFinalizationSchema,
   uploadProgressSchema,
 } from "@/lib/uploads/validation";
+import type { UploadTargetKind } from "@/lib/uploads/contracts";
+
+function expectedTarget(request: Request): UploadTargetKind {
+  const target = new URL(request.url).searchParams.get("target");
+  return target === "workspace_file" ? "workspace_file" : "project_file";
+}
 
 async function requireAuthenticatedClient() {
   const supabase = await createClient();
@@ -36,7 +42,7 @@ function uploadError(error: unknown) {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ reservationId: string }> },
 ) {
   try {
@@ -54,7 +60,7 @@ export async function GET(
     const session = await getUploadSession(
       supabase,
       parsed.data.reservationId,
-      "project_file",
+      expectedTarget(request),
     );
     if (!session) {
       return Response.json(
@@ -93,7 +99,7 @@ export async function PATCH(
     const result = await reportUploadProgress(
       supabase,
       reservation.data.reservationId,
-      "project_file",
+      expectedTarget(request),
       progress.data.bytesUploaded,
     );
     if (!result) {

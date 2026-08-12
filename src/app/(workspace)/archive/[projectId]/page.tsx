@@ -37,6 +37,8 @@ export default async function ArchiveProjectPage({
   const data = await getArchiveProjectData(projectId, {
     query: search,
     recordType: recordType && recordType !== "all" ? recordType : undefined,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
   });
   if (!data) notFound();
 

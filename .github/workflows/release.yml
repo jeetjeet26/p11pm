@@ -102,13 +102,21 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.preflight.outputs.run == 'true'
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - id: install
         name: Install locked dependencies
         if: steps.preflight.outputs.run == 'true'
         run: npm ci
+
+      - id: db
+        name: Database reset and pgTAP/RLS tests
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        run: |
+          npx --no-install supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+          npm run db:reset
+          npm run test:db
 
       - id: source
         name: Verify immutable source
@@ -367,6 +375,14 @@ jobs:
         if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
         run: npm run test:unit
 
+      - id: db
+        name: Database reset and pgTAP/RLS tests
+        if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
+        run: |
+          npx --no-install supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+          npm run db:reset
+          npm run test:db
+
       - id: build
         name: Production build
         if: always() && steps.preflight.outputs.run == 'true' && steps.install.outcome == 'success'
@@ -413,6 +429,7 @@ jobs:
           BUDGET_OUTCOME: ${{ steps.budgets.outcome }}
           BUILD_OUTCOME: ${{ steps.build.outcome }}
           CLI_OUTCOME: ${{ steps.cli.outcome }}
+          DB_OUTCOME: ${{ steps.db.outcome }}
           DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
           DEPLOYMENT_OUTCOME: ${{ steps.deployment.outcome }}
           E2E_OUTCOME: ${{ steps.e2e.outcome }}
@@ -452,7 +469,7 @@ jobs:
             --output release-evidence.json \
             "${deployment_args[@]}" \
             --require-clean \
-            --require-passing immutable-source,deployment-commit,rollback-target,pinned-clis,production-audit,lint,typecheck,unit,build,route-budgets,preview-access,preview-e2e,staging-evidence \
+            --require-passing immutable-source,deployment-commit,rollback-target,pinned-clis,production-audit,lint,typecheck,unit,db-reset-pgtap,build,route-budgets,preview-access,preview-e2e,staging-evidence \
             --check "immutable-source=$(status "$SOURCE_OUTCOME")" \
             --check "deployment-commit=$(status "$DEPLOYMENT_OUTCOME")" \
             --check "rollback-target=$(status "$ROLLBACK_OUTCOME")" \
@@ -461,6 +478,7 @@ jobs:
             --check "lint=$(status "$LINT_OUTCOME")" \
             --check "typecheck=$(status "$TYPECHECK_OUTCOME")" \
             --check "unit=$(status "$UNIT_OUTCOME")" \
+            --check "db-reset-pgtap=$(status "$DB_OUTCOME")" \
             --check "build=$(status "$BUILD_OUTCOME")" \
             --check "route-budgets=$(status "$BUDGET_OUTCOME")" \
             --check "preview-access=$(status "$ACCESS_OUTCOME")" \
@@ -495,7 +513,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install pinned Vercel CLI

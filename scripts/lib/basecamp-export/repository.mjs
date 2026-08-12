@@ -478,6 +478,15 @@ export class BasecampExportRepository {
     return blob ?? null;
   }
 
+  async listPendingArchiveEntryIds(runId) {
+    const rows = await this.selectAll(
+      "basecamp_archive_entries",
+      "id",
+      (query) => query.eq("run_id", runId).is("blob_id", null),
+    );
+    return new Set(rows.map((row) => row.id));
+  }
+
   async claimBlob(row) {
     const { data, error } = await this.client.rpc(
       "claim_basecamp_file_blob",
@@ -595,6 +604,25 @@ export class BasecampExportRepository {
       .info(objectPath);
     if (error || !data) return false;
     return Number(data.metadata?.size ?? data.size) === sizeBytes;
+  }
+
+  async uploadEmptyBlob({ bucketId, objectPath, mimeType }) {
+    const { error } = await this.client.storage
+      .from(bucketId)
+      .upload(objectPath, new Uint8Array(0), {
+        contentType: mimeType,
+        upsert: false,
+      });
+    if (
+      error &&
+      !(await this.verifyBlobObject({
+        bucketId,
+        objectPath,
+        sizeBytes: 0,
+      }))
+    ) {
+      throw error;
+    }
   }
 
   async linkEntryBlob(entryId, blobId, { sha256, crc32 }) {

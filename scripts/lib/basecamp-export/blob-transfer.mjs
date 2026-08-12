@@ -7,7 +7,20 @@ import { contentObjectPath, stableUuid } from "./identity.mjs";
 import { uploadStoredEntry } from "./tus-upload.mjs";
 
 function errorMessage(error) {
-  return error instanceof Error ? error.message : String(error);
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") return JSON.stringify(error);
+  return String(error);
+}
+
+function isTransientOperationError(error) {
+  const message = errorMessage(error).toLowerCase();
+  return (
+    message.includes("fetch failed") ||
+    message.includes("timeout") ||
+    message.includes("enotfound") ||
+    message.includes("econnreset") ||
+    message.includes("socket")
+  );
 }
 
 function responseStatus(error) {
@@ -34,12 +47,16 @@ function progressWriter(repository, blobId) {
       }
       lastBytes = progress.bytesUploaded;
       lastAt = now;
-      chain = chain.then(() =>
-        repository.updateBlobProgress(blobId, {
-          uploadUrl: progress.uploadUrl,
-          uploadOffset: progress.bytesUploaded,
-        }),
-      );
+      chain = chain
+        .then(() =>
+          repository.updateBlobProgress(blobId, {
+            uploadUrl: progress.uploadUrl,
+            uploadOffset: progress.bytesUploaded,
+          }),
+        )
+        .catch(() => {
+          // Progress checkpoints are best effort; final blob readiness is authoritative.
+        });
     },
     async settle() {
       await chain;
@@ -59,6 +76,7 @@ export async function transferArchiveEntries({
   bucketName = "project-files",
   concurrency = 2,
   resume = true,
+  entriesArePending = false,
   signal,
   onEntryComplete,
 }) {
@@ -107,6 +125,24 @@ export async function transferArchiveEntries({
       }
 
       const activeBlobId = claimed.id ?? blobId;
+      if (entry.sizeBytes === 0) {
+        try {
+          await repository.uploadEmptyBlob({
+            bucketId: bucketName,
+            objectPath,
+            mimeType: mimeType(entry),
+          });
+          await repository.markBlobReady(activeBlobId, {
+            uploadUrl: null,
+            uploadOffset: 0,
+          });
+          totals.uploadedBlobs += 1;
+          return { id: activeBlobId, uploaded: true };
+        } catch (error) {
+          await repository.markBlobFailed(activeBlobId, errorMessage(error));
+          throw error;
+        }
+      }
       const writer = progressWriter(repository, activeBlobId);
       try {
         let currentUploadUrl = resume ? claimed.upload_url ?? null : null;
@@ -217,35 +253,48 @@ export async function transferArchiveEntries({
   await Promise.all(
     entries.map((entry) =>
       limit(async () => {
-        if (signal?.aborted) throw signal.reason ?? new Error("Import aborted.");
-        const entryId = entryIdForPath(entry.fileName);
-        const checkpoint = resume
-          ? await repository.getEntryBlobCheckpoint(entryId)
-          : null;
-        if (checkpoint?.status === "ready") {
-          totals.processedEntries += 1;
-          totals.skippedEntries += 1;
-          await onEntryComplete?.({
-            entry,
-            status: "skipped",
-            totals: { ...totals },
-          });
-          return;
-        }
+        for (let attempt = 0; ; attempt += 1) {
+          try {
+            if (signal?.aborted) {
+              throw signal.reason ?? new Error("Import aborted.");
+            }
+            const entryId = entryIdForPath(entry.fileName);
+            const checkpoint =
+              resume && !entriesArePending
+                ? await repository.getEntryBlobCheckpoint(entryId)
+                : null;
+            if (checkpoint?.status === "ready") {
+              totals.processedEntries += 1;
+              totals.skippedEntries += 1;
+              await onEntryComplete?.({
+                entry,
+                status: "skipped",
+                totals: { ...totals },
+              });
+              return;
+            }
 
-        const digest = await archive.verifyAndHash(entry);
-        totals.bytesHashed += digest.bytesRead;
-        const blob = await processBlob(entry, digest);
-        await repository.linkEntryBlob(entryId, blob.id, {
-          sha256: digest.sha256,
-          crc32: digest.crc32,
-        });
-        totals.processedEntries += 1;
-        await onEntryComplete?.({
-          entry,
-          status: blob.uploaded ? "uploaded" : "deduplicated",
-          totals: { ...totals },
-        });
+            const digest = await archive.verifyAndHash(entry);
+            const blob = await processBlob(entry, digest);
+            await repository.linkEntryBlob(entryId, blob.id, {
+              sha256: digest.sha256,
+              crc32: digest.crc32,
+            });
+            totals.bytesHashed += digest.bytesRead;
+            totals.processedEntries += 1;
+            await onEntryComplete?.({
+              entry,
+              status: blob.uploaded ? "uploaded" : "deduplicated",
+              totals: { ...totals },
+            });
+            return;
+          } catch (error) {
+            if (!isTransientOperationError(error) || attempt >= 5) throw error;
+            await new Promise((resolve) =>
+              setTimeout(resolve, 1_000 * 2 ** attempt),
+            );
+          }
+        }
       }),
     ),
   );

@@ -39,6 +39,10 @@ export default async function WorkspaceLayout({ children }: LayoutProps<"/">) {
 
   return (
     <AppShell
+      canCommercialRead={
+        demoMode || (viewer?.capabilities.commercialRead ?? false)
+      }
+      canSupportRead={demoMode || (viewer?.capabilities.supportRead ?? false)}
       demoMode={demoMode}
       isAdmin={viewer?.role === "admin"}
       user={shellUser}

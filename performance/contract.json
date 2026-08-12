@@ -1,7 +1,7 @@
 {
   "$schema": "./schemas/v1/performance-contract.schema.json",
   "schemaVersion": "1.0.0",
-  "contractVersion": "1.7.0",
+  "contractVersion": "1.9.0",
   "name": "P11 PM production performance contract",
   "status": "active",
   "effectiveDate": "2026-08-08",
@@ -36,8 +36,16 @@
     "authenticatedPages": {
       "routes": [
         "/dashboard",
+        "/clients",
+        "/clients/[clientId]",
         "/projects",
         "/projects/[projectId]",
+        "/files",
+        "/retainers",
+        "/retainers/[retainerId]",
+        "/time",
+        "/billing",
+        "/billing/[invoiceId]",
         "/team",
         "/chat/[conversationId]"
       ],
@@ -105,9 +113,49 @@
           "maxKiB": 200
         },
         {
+          "route": "/files",
+          "nextRouteKey": "/(workspace)/files/page",
+          "maxKiB": 220
+        },
+        {
+          "route": "/clients",
+          "nextRouteKey": "/(workspace)/clients/page",
+          "maxKiB": 200
+        },
+        {
+          "route": "/clients/[clientId]",
+          "nextRouteKey": "/(workspace)/clients/[clientId]/page",
+          "maxKiB": 220
+        },
+        {
+          "route": "/retainers",
+          "nextRouteKey": "/(workspace)/retainers/page",
+          "maxKiB": 200
+        },
+        {
+          "route": "/retainers/[retainerId]",
+          "nextRouteKey": "/(workspace)/retainers/[retainerId]/page",
+          "maxKiB": 220
+        },
+        {
+          "route": "/time",
+          "nextRouteKey": "/(workspace)/time/page",
+          "maxKiB": 220
+        },
+        {
+          "route": "/billing",
+          "nextRouteKey": "/(workspace)/billing/page",
+          "maxKiB": 220
+        },
+        {
+          "route": "/billing/[invoiceId]",
+          "nextRouteKey": "/(workspace)/billing/[invoiceId]/page",
+          "maxKiB": 220
+        },
+        {
           "route": "/chat/[conversationId]",
           "nextRouteKey": "/(workspace)/chat/[[...conversationId]]/page",
-          "maxKiB": 200
+          "maxKiB": 205
         },
         {
           "route": "/team",
@@ -144,7 +192,8 @@
       "firstViewportPreviewMiB": 5
     },
     "accelo": {
-      "enabled": false,
+      "enabled": true,
+      "mode": "shadow-read-only",
       "requiredWhenEnabled": {
         "minimumSuccessRate": 0.999,
         "runP99Ms": 240000,

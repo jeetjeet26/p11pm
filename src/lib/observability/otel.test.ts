@@ -58,4 +58,50 @@ describe("SafeAttributeSpanProcessor", () => {
     expect(span.name).toBe("GET outbound request");
     expect(span.attributes).toEqual({ "http.method": "GET" });
   });
+
+  it("keeps only bounded operational dimensions", () => {
+    const span = {
+      name: "accelo sync",
+      attributes: {
+        "app.provider": "accelo",
+        "app.entity": "invoice",
+        "app.run_kind": "scheduled",
+        "app.outcome": "partial",
+        "app.retry_category": "rate_limit",
+        "app.entity.id": "private-entity-id",
+        "app.provider_account": "private-account",
+      },
+      events: [],
+      links: [],
+    } as unknown as ReadableSpan;
+
+    new SafeAttributeSpanProcessor().onEnd(span);
+
+    expect(span.attributes).toEqual({
+      "app.provider": "accelo",
+      "app.entity": "invoice",
+      "app.run_kind": "scheduled",
+      "app.outcome": "partial",
+      "app.retry_category": "rate_limit",
+    });
+  });
+
+  it("drops high-cardinality values from operational dimensions", () => {
+    const span = {
+      name: "provider sync",
+      attributes: {
+        "app.provider": "customer-specific-provider",
+        "app.entity": "invoice-12345",
+        "app.run_kind": "run-2026-08-11",
+        "app.outcome": "failed-for-customer",
+        "app.retry_category": "private@example.com",
+      },
+      events: [],
+      links: [],
+    } as unknown as ReadableSpan;
+
+    new SafeAttributeSpanProcessor().onEnd(span);
+
+    expect(span.attributes).toEqual({});
+  });
 });

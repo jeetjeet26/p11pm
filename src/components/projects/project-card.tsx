@@ -7,9 +7,11 @@ import { cn } from "@/lib/utils";
 import type { Project } from "@/lib/types";
 
 const statusLabels: Record<Project["status"], string> = {
+  planning: "Planning",
   active: "Active",
   on_hold: "On hold",
   completed: "Completed",
+  cancelled: "Cancelled",
 };
 
 export function ProjectCard({ project }: { project: Project }) {
@@ -34,18 +36,29 @@ export function ProjectCard({ project }: { project: Project }) {
           <p className="line-clamp-2 min-h-10 text-sm leading-5 text-muted-foreground">
             {project.description}
           </p>
-          <div className="mt-5">
-            <div className="mb-2 flex justify-between text-xs">
-              <span className="text-muted-foreground">Progress</span>
-              <span className="font-medium">{project.progress}%</span>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                aria-label={`${project.progress}% complete`}
-                className="h-full rounded-full bg-primary"
-                style={{ width: `${project.progress}%` }}
-              />
-            </div>
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            {"code" in project && typeof project.code === "string" && (
+              <Badge className="font-mono" variant="outline">
+                {project.code}
+              </Badge>
+            )}
+            {"priority" in project && typeof project.priority === "string" && (
+              <Badge variant="secondary">{project.priority} priority</Badge>
+            )}
+            {project.billingType && (
+              <Badge variant="outline">
+                {project.billingType === "time_and_materials"
+                  ? "T&M"
+                  : project.billingType === "fixed_fee"
+                    ? "Fixed fee"
+                    : "Internal"}
+              </Badge>
+            )}
+            {project.sourceSystem === "basecamp" && (
+              <span className="text-xs text-muted-foreground">
+                Archive linked
+              </span>
+            )}
           </div>
         </CardContent>
         <CardFooter className="mt-auto flex items-center justify-between border-t px-5 py-3 text-xs text-muted-foreground">

@@ -435,6 +435,17 @@ async function main() {
           (entry) => entry.projectId === options.projectId,
         );
       }
+      let entriesArePending = false;
+      if (options.resume) {
+        const pendingEntryIds =
+          await repository.listPendingArchiveEntryIds(runId);
+        entries = entries.filter((entry) =>
+          pendingEntryIds.has(
+            stableUuid("basecamp-archive-entry", runId, entry.fileName),
+          ),
+        );
+        entriesArePending = true;
+      }
       if (options.limit) entries = entries.slice(0, options.limit);
       let lastCheckpoint = 0;
       const totals = await transferArchiveEntries({
@@ -449,13 +460,29 @@ async function main() {
         serviceRoleKey,
         concurrency: options.concurrency,
         resume: options.resume,
+        entriesArePending,
         async onEntryComplete({ entry, status, totals: progress }) {
           if (
             progress.processedEntries - lastCheckpoint >= 25 ||
             progress.processedEntries === progress.entries
           ) {
             lastCheckpoint = progress.processedEntries;
-            await repository.updateTransferProgress(runId, progress);
+            try {
+              await repository.updateTransferProgress(runId, progress);
+            } catch (error) {
+              console.warn(
+                JSON.stringify({
+                  phase: "files",
+                  status: "checkpoint_warning",
+                  error:
+                    error instanceof Error
+                      ? error.message
+                      : error && typeof error === "object"
+                        ? JSON.stringify(error)
+                        : String(error),
+                }),
+              );
+            }
             console.log(
               JSON.stringify({
                 phase: "files",

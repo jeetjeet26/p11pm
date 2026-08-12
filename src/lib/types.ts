@@ -1,6 +1,24 @@
-export type ProjectStatus = "active" | "on_hold" | "completed";
+export type ProjectStatus =
+  | "planning"
+  | "active"
+  | "on_hold"
+  | "completed"
+  | "cancelled";
+export type ProjectBillingType =
+  | "time_and_materials"
+  | "fixed_fee"
+  | "internal";
 export type WorkloadLevel = "light" | "normal" | "heavy";
-export type TodoStatus = "open" | "in_progress" | "blocked" | "completed";
+export type TodoStatus =
+  | "open"
+  | "in_progress"
+  | "blocked"
+  | "review"
+  | "completed"
+  | "cancelled";
+export type TodoPriority = "low" | "medium" | "high" | "urgent";
+export type IssueType = "task" | "story" | "bug" | "epic";
+export type OperationalState = "active" | "triage" | "historical";
 
 export interface Profile {
   id: string;
@@ -13,13 +31,31 @@ export interface Profile {
   isInternal: boolean;
   acceloStaffId?: string;
   slackUserId?: string;
+  timeZone?: string;
+  weeklyCapacityMinutes?: number;
 }
 
 export interface Project {
   id: string;
   name: string;
   client: string;
+  clientId?: string;
   description: string;
+  code?: string;
+  ownerId?: string;
+  priority?: TodoPriority;
+  startDate?: string;
+  dueDate?: string;
+  budget?: number;
+  currency?: string;
+  billingType?: ProjectBillingType;
+  fixedFee?: number;
+  hourlyRate?: number;
+  billingCap?: number;
+  commercialValue?: number;
+  billingCadence?: "weekly" | "monthly" | "quarterly" | "milestone" | "completion";
+  timeRoundingMinutes?: 1 | 5 | 6 | 10 | 15 | 30 | 60;
+  archivedAt?: string;
   status: ProjectStatus;
   color: string;
   acceloJobId?: string;
@@ -36,6 +72,7 @@ export interface TodoList {
   projectId: string;
   name: string;
   position: number;
+  issueCount?: number;
 }
 
 export interface Todo {
@@ -49,10 +86,36 @@ export interface Todo {
   completionSubscriberIds?: string[];
   dueDate?: string;
   status: TodoStatus;
-  priority: "low" | "normal" | "high";
+  /** `normal` remains a temporary display alias for legacy demo/UI data. */
+  priority: TodoPriority | "normal";
+  issueKey?: string;
+  issueNumber?: number;
+  issueType?: IssueType;
+  rank?: number;
+  operationalState?: OperationalState;
+  labels?: string[];
+  estimatedMinutes?: number;
+  actualMinutes?: number;
+  milestoneId?: string;
+  cycleId?: string;
+  riskLevel?: "none" | "low" | "medium" | "high";
+  riskReason?: string;
   acceloTaskId?: string;
+  createdAt?: string;
+  completedAt?: string;
+  sourceCreatedAt?: string;
   updatedAt: string;
   version?: number;
+}
+
+export interface IssueStatusTransition {
+  id: string;
+  todoId: string;
+  fromStatus: TodoStatus;
+  toStatus: TodoStatus;
+  actorId?: string;
+  issueVersion: number;
+  createdAt: string;
 }
 
 export interface TodoSubtask {
@@ -117,7 +180,14 @@ export interface Milestone {
   id: string;
   projectId: string;
   title: string;
+  description?: string;
+  status?: "upcoming" | "in_progress" | "completed" | "missed" | "cancelled";
+  ownerId?: string;
+  completedAt?: string;
   dueDate: string;
+  position?: number;
+  riskLevel?: "none" | "low" | "medium" | "high";
+  riskReason?: string;
   acceloMilestoneId?: string;
 }
 
@@ -127,5 +197,8 @@ export interface ActivityEvent {
   actorId: string;
   verb: string;
   object: string;
+  entityType?: string;
+  entityId?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 }

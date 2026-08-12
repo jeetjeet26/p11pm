@@ -11,7 +11,11 @@ P11 PM is an internal creative-operations workspace for P11 Creative. It keeps B
 - Threaded message board
 - Realtime project Campfire
 - Realtime P11 Chat with public/private channels and one-to-one/group DMs
+- Conversation-to-work capture, project-bound channels, work signals, pins, edits,
+  source-linked decisions, and cited catch-up briefs
 - Supabase Storage-backed docs and files
+- Unified attention inbox, roadmap/dependency/approval views, recurring work,
+  scoped integration tokens, and guest/client collaboration
 - Executive Team View with per-person workload, project grouping, overdue filters, and a plain-language due-next list
 - Cross-project activity feed
 - Slack app with `/pm`, events, message actions, and notifications
@@ -19,12 +23,12 @@ P11 PM is an internal creative-operations workspace for P11 Creative. It keeps B
 
 Local development includes optional demo data. Production demo access is disabled.
 
-P11 PM intentionally omits social reactions, boosts, and likes. Work context stays
-in the thread through comments, mentions, files, and explicit completion state.
+P11 PM omits social boosts and likes. Chat uses a constrained set of work signals
+such as acknowledge, approve, blocked, and done so coordination stays explicit.
 
 ## Local setup
 
-Requirements: Node.js 20.9+ and npm.
+Requirements: Node.js 22+ and npm.
 
 ```bash
 npm install
@@ -53,8 +57,9 @@ Optional integrations fail closed with a clear `503` until configured:
 - Slack: `SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`
 - Cowork connector: `MCP_API_KEY`
 
-Accelo is intentionally disabled and has no Vercel schedule or runtime
-credentials.
+The legacy Accelo integration is intentionally disabled and has no Vercel
+schedule or runtime credentials. CRM, retainers, time, and billing are native
+P11 PM domains backed by the primary Supabase project.
 
 ## Supabase provisioning
 
@@ -99,8 +104,8 @@ environment. Export coverage and known source gaps are recorded in
 channels plus one-to-one and group direct messages with persistent unread
 state, single-level Slack-style threads with independent unread state, secure
 file attachments and image previews, keyset-paginated history, idempotent
-sends, and Supabase Realtime delivery. It intentionally omits nested threads,
-reactions, presence, and message editing or deletion.
+sends, work signals, pins, message editing with history, soft deletion, and
+Supabase Realtime delivery. It intentionally omits nested threads and presence.
 
 P11 Chat is separate from project Campfire and from the external Slack app:
 Campfire stays scoped to one project, while Slack commands and notifications
@@ -112,12 +117,28 @@ issue one-time workspace invites so every teammate claims an individual
 passwordless account. `npm run provision:chat-users` now exits with those
 instructions and never mutates Auth users.
 
-## Accelo (disabled)
+## Accelo read-only migration bridge
 
-Accelo is not active functionality. Its Vercel cron schedule is removed, the
-application does not promise synchronization or freshness, and no Accelo
-credentials are required for release. Imported external IDs remain only for
-data lineage; the scheduled route and write-back implementation are absent.
+Accelo is a pull-only migration source. The integration requests short-lived
+OAuth tokens with read-only scope and uses GET requests for business resources;
+it has no Accelo write-back path. Responses are staged with provider-qualified
+identity, hashes, checkpoints, quarantine, reconciliation, and per-entity
+authority state before promotion into the native Supabase operational model.
+
+Production requires `ACCELO_DEPLOYMENT`, `ACCELO_CLIENT_ID`, and
+`ACCELO_CLIENT_SECRET` as sensitive server-only variables. Integration health,
+freshness, drift, and cutover state are available to authorized operators. Once
+an entity group becomes Supabase-authoritative, later Accelo pulls remain
+audit-only and cannot overwrite native operational fields.
+
+## Agency operations
+
+P11 PM includes a native operational core with first-class clients and
+contacts, commercial project types, recurring retainers and allowance periods,
+auditable time entries with rate snapshots, invoices, and allocated payments.
+The current Supabase project is the destination and eventual authority; these
+modules do not query the separate Data Lake. Accelo remains authoritative only
+for entity groups that have not passed the staged cutover gate.
 
 ## Slack
 
@@ -208,8 +229,17 @@ K6_BASE_URL=https://staging.example.com npm run test:load:smoke
 ## Routes
 
 - `/dashboard` — operating overview
+- `/clients` and `/clients/[clientId]` — CRM accounts, contacts, activity, and client economics
 - `/projects` and `/projects/[projectId]` — project workspaces
+- `/retainers` and `/retainers/[retainerId]` — recurring agreements and period burn
+- `/time` — personal timesheets and manager approvals
+- `/billing` and `/billing/[invoiceId]` — invoices, balances, and payments
 - `/chat` and `/chat/[conversationId]` — P11 channels and direct messages
+- `/inbox` — unified mentions, unread chat, assignments, approvals, and deadlines
+- `/roadmap` — decisions, approvals, dependencies, cycles, and automations
+- `/capture` — mobile-friendly issue capture
+- `/saved` — personal saved messages and work
+- `/client` — guest deliverables and approval portal
 - `/team` — executive workload view
 - `/my-work` — personal assignments
 - `/activity` — cross-project activity

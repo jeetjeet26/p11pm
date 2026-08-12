@@ -6,6 +6,7 @@ import {
 } from "@/lib/integrations/slack";
 import {
   getDirectStorageEndpoint,
+  getSignedStorageEndpoint,
   MAX_UPLOAD_SIZE,
   TUS_CHUNK_SIZE,
   uploadCacheKey,
@@ -28,6 +29,12 @@ describe("resumable upload contracts", () => {
     expect(
       getDirectStorageEndpoint("http://127.0.0.1:55321"),
     ).toBe("http://127.0.0.1:55321/storage/v1/upload/resumable");
+  });
+
+  it("uses the signed TUS endpoint for presigned uploads", () => {
+    expect(getSignedStorageEndpoint("https://example.supabase.co")).toBe(
+      "https://example.storage.supabase.co/storage/v1/upload/resumable/sign",
+    );
   });
 
   it("pins the required six-megabyte TUS chunks", () => {

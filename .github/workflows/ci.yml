@@ -23,7 +23,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - id: install
@@ -57,6 +57,14 @@ jobs:
         if: always() && steps.install.outcome == 'success'
         run: npm run test:unit
 
+      - id: db
+        name: Database reset and pgTAP/RLS tests
+        if: always() && steps.install.outcome == 'success'
+        run: |
+          npx --no-install supabase start -x studio,imgproxy,edge-runtime,logflare,vector
+          npm run db:reset
+          npm run test:db
+
       - id: build
         name: Production build
         if: always() && steps.install.outcome == 'success'
@@ -73,6 +81,7 @@ jobs:
         env:
           BUILD_OUTCOME: ${{ steps.build.outcome }}
           BUDGET_OUTCOME: ${{ steps.budgets.outcome }}
+          DB_OUTCOME: ${{ steps.db.outcome }}
           AUDIT_OUTCOME: ${{ steps.audit.outcome }}
           CLI_OUTCOME: ${{ steps.cli.outcome }}
           LINT_OUTCOME: ${{ steps.lint.outcome }}
@@ -95,6 +104,7 @@ jobs:
             --check "lint=$(status "$LINT_OUTCOME")" \
             --check "typecheck=$(status "$TYPECHECK_OUTCOME")" \
             --check "unit=$(status "$UNIT_OUTCOME")" \
+            --check "db-reset-pgtap=$(status "$DB_OUTCOME")" \
             --check "build=$(status "$BUILD_OUTCOME")" \
             --check "route-budgets=$(status "$BUDGET_OUTCOME")"
 

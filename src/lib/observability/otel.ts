@@ -10,9 +10,66 @@ import { normalizeRoute } from "./routes";
 const SENSITIVE_ATTRIBUTE =
   /(?:authorization|cookie|body|content|email|file(?:name)?|signed|secret|token|query|statement|http\.target|http\.url|url\.full|url\.query|user\.id|profile\.id|project\.id|conversation\.id|message\.id|attachment\.id|next\.page|next\.segment)/i;
 const SAFE_ATTRIBUTE =
-  /^(?:app\.(?:navigation_type|route|web_vital\.(?:delta|name|rating|value))|db\.(?:operation(?:\.name)?|system(?:\.name)?)|error\.type|http\.(?:method|request\.method|response\.status_code|route|status_code)|network\.protocol\.(?:name|version)|next\.route|rpc\.(?:method|service|system)|server\.port)$/;
+  /^(?:app\.(?:entity|navigation_type|outcome|provider|retry_category|route|run_kind|web_vital\.(?:delta|name|rating|value))|db\.(?:operation(?:\.name)?|system(?:\.name)?)|error\.type|http\.(?:method|request\.method|response\.status_code|route|status_code)|network\.protocol\.(?:name|version)|next\.route|rpc\.(?:method|service|system)|server\.port)$/;
 const SENSITIVE_VALUE =
   /(?:https?:\/\/\S+|[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}|[a-f0-9]{8}-[a-f0-9-]{27,}|\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+|(?:authorization|cookie|password|secret|signature|token)(?:=|:\s*))/i;
+const LOW_CARDINALITY_VALUES: Record<string, ReadonlySet<string>> = {
+  "app.provider": new Set([
+    "accelo",
+    "ai_gateway",
+    "mcp",
+    "slack",
+    "storage",
+    "supabase",
+    "vercel",
+    "unknown",
+  ]),
+  "app.entity": new Set([
+    "activity",
+    "company",
+    "contact",
+    "contract",
+    "file",
+    "invoice",
+    "job",
+    "message",
+    "notification",
+    "project",
+    "todo",
+    "unknown",
+  ]),
+  "app.run_kind": new Set([
+    "backfill",
+    "cleanup",
+    "manual",
+    "reconciliation",
+    "retry",
+    "scheduled",
+    "webhook",
+    "unknown",
+  ]),
+  "app.outcome": new Set([
+    "cancelled",
+    "failure",
+    "partial",
+    "queued",
+    "running",
+    "skipped",
+    "success",
+    "unknown",
+  ]),
+  "app.retry_category": new Set([
+    "auth",
+    "conflict",
+    "network",
+    "none",
+    "rate_limit",
+    "server",
+    "timeout",
+    "unknown",
+    "validation",
+  ]),
+};
 
 function hasSensitiveValue(value: AttributeValue | undefined): boolean {
   if (typeof value === "string") return SENSITIVE_VALUE.test(value);
@@ -32,11 +89,15 @@ function redactAttributes(attributes: ReadableSpan["attributes"]): void {
   }
 
   for (const key of Object.keys(mutable)) {
+    const lowCardinalityValues = LOW_CARDINALITY_VALUES[key];
+    const value = mutable[key];
     if (
       !SAFE_ATTRIBUTE.test(key) ||
       SENSITIVE_ATTRIBUTE.test(key) ||
       /(?:^|\.)id$/.test(key) ||
-      hasSensitiveValue(mutable[key])
+      hasSensitiveValue(value) ||
+      (lowCardinalityValues &&
+        (typeof value !== "string" || !lowCardinalityValues.has(value)))
     ) {
       delete mutable[key];
     }

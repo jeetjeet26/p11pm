@@ -1,20 +1,31 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   Activity,
   Archive,
+  Bell,
+  Bookmark,
   BriefcaseBusiness,
+  Building2,
   ChevronDown,
   ClipboardCheck,
+  GanttChart,
+  HardDrive,
+  Headphones,
   LayoutDashboard,
   Layers3,
   LogOut,
   Menu,
   MessageCircle,
-  Search,
+  PlusCircle,
+  ReceiptText,
+  Repeat2,
   ShieldCheck,
+  Timer,
   Users,
 } from "lucide-react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -29,7 +40,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import {
   Sheet,
@@ -41,13 +51,37 @@ import {
 } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
+const HeaderSearch = dynamic(() =>
+  import("@/components/layout/header-search").then(
+    (module) => module.HeaderSearch,
+  ),
+);
+
 const navigation = [
   { href: "/dashboard", label: "Home", icon: LayoutDashboard, adminOnly: false },
-  { href: "/projects", label: "Projects", icon: BriefcaseBusiness, adminOnly: false },
+  { href: "/files", label: "Files", icon: HardDrive, adminOnly: false },
+  { href: "/inbox", label: "Inbox", icon: Bell, adminOnly: false },
   { href: "/chat", label: "Chat", icon: MessageCircle, adminOnly: false },
-  { href: "/team", label: "Team view", icon: Users, adminOnly: false },
+];
+
+const workNavigation = [
+  { href: "/projects", label: "Projects", icon: BriefcaseBusiness, adminOnly: false },
+  { href: "/support", label: "Support", icon: Headphones, adminOnly: false },
   { href: "/my-work", label: "My assignments", icon: ClipboardCheck, adminOnly: false },
-  { href: "/activity", label: "Latest activity", icon: Activity, adminOnly: false },
+  { href: "/team", label: "Team capacity", icon: Users, adminOnly: false },
+  { href: "/roadmap", label: "Portfolio", icon: GanttChart, adminOnly: false },
+];
+
+const clientNavigation = [
+  { href: "/clients", label: "Companies", icon: Building2, adminOnly: false },
+  { href: "/clients/prospects", label: "Prospects", icon: Activity, adminOnly: false },
+];
+
+const moreNavigation = [
+  { href: "/saved", label: "Saved items", icon: Bookmark, adminOnly: false },
+  { href: "/capture", label: "Quick capture", icon: PlusCircle, adminOnly: false },
+  { href: "/client", label: "Shared with me", icon: Users, adminOnly: false },
+  { href: "/activity", label: "Audit history", icon: Activity, adminOnly: false },
   { href: "/archive", label: "Basecamp archive", icon: Archive, adminOnly: false },
   {
     href: "/admin",
@@ -55,6 +89,19 @@ const navigation = [
     icon: ShieldCheck,
     adminOnly: true,
   },
+  {
+    href: "/admin/operations",
+    label: "Access & integrations",
+    icon: ShieldCheck,
+    adminOnly: true,
+  },
+];
+
+const commercialNavigation = [
+  { href: "/retainers", label: "Contracts", icon: Repeat2 },
+  { href: "/time", label: "Time", icon: Timer },
+  { href: "/billing", label: "Billing", icon: ReceiptText },
+  { href: "/reports", label: "Reports", icon: Activity },
 ];
 
 interface ShellUser {
@@ -64,40 +111,166 @@ interface ShellUser {
 }
 
 function Navigation({
+  canCommercialRead,
+  canSupportRead,
   isAdmin,
+  inboxCount = 0,
   onNavigate,
 }: {
+  canCommercialRead: boolean;
+  canSupportRead: boolean;
   isAdmin: boolean;
+  inboxCount?: number;
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
+  const commercialActive = commercialNavigation.some(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  );
+  const workActive = workNavigation.some(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  );
+  const clientsActive = clientNavigation.some(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  );
+  const moreActive = moreNavigation.some(
+    (item) => pathname === item.href || pathname.startsWith(`${item.href}/`),
+  );
+  const [workOpen, setWorkOpen] = useState(workActive);
+  const [clientsOpen, setClientsOpen] = useState(clientsActive);
+  const [commercialOpen, setCommercialOpen] = useState(commercialActive);
+  const [moreOpen, setMoreOpen] = useState(moreActive);
+  const visibleWorkNavigation = workNavigation.filter(
+    (item) => item.href !== "/support" || canSupportRead,
+  );
+  const visibleMoreNavigation = moreNavigation.filter(
+    (item) => !item.adminOnly || isAdmin,
+  );
+
+  function renderNavigationItem(
+    item:
+      | (typeof navigation)[number]
+      | (typeof workNavigation)[number]
+      | (typeof clientNavigation)[number]
+      | (typeof commercialNavigation)[number]
+      | (typeof moreNavigation)[number],
+    nested = false,
+  ) {
+    const active =
+      pathname === item.href || pathname.startsWith(`${item.href}/`);
+    return (
+      <Button
+        asChild
+        className={cn(
+          nested ? "h-9 justify-start px-3" : "h-10 justify-start px-3",
+          "text-sidebar-foreground/70",
+          active &&
+            "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent",
+        )}
+        key={item.href}
+        onClick={onNavigate}
+        variant="ghost"
+      >
+        <Link href={item.href}>
+          <item.icon />
+          {item.label}
+          {item.href === "/inbox" && inboxCount > 0 && (
+            <Badge className="ml-auto h-5 min-w-5 justify-center px-1.5 text-[10px]">
+              {inboxCount > 99 ? "99+" : inboxCount}
+            </Badge>
+          )}
+        </Link>
+      </Button>
+    );
+  }
+
+  function renderGroup({
+    active,
+    icon: Icon,
+    items,
+    label,
+    open,
+    setOpen,
+  }: {
+    active: boolean;
+    icon: typeof BriefcaseBusiness;
+    items: Array<
+      | (typeof workNavigation)[number]
+      | (typeof clientNavigation)[number]
+      | (typeof commercialNavigation)[number]
+      | (typeof moreNavigation)[number]
+    >;
+    label: string;
+    open: boolean;
+    setOpen: (value: boolean) => void;
+  }) {
+    return (
+      <>
+        <Button
+          aria-expanded={open}
+          className={cn(
+            "h-10 justify-start px-3 text-sidebar-foreground/70",
+            active && "text-sidebar-accent-foreground",
+          )}
+          onClick={() => setOpen(!open)}
+          variant="ghost"
+        >
+          <Icon />
+          {label}
+          <ChevronDown
+            className={cn(
+              "ml-auto size-4 transition-transform",
+              open && "rotate-180",
+            )}
+          />
+        </Button>
+        {open ? (
+          <div className="ml-4 grid gap-1 border-l border-sidebar-border pl-2">
+            {items.map((item) => renderNavigationItem(item, true))}
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
   return (
     <nav aria-label="Main navigation" className="grid gap-1">
-      {navigation
-        .filter((item) => !item.adminOnly || isAdmin)
-        .map((item) => {
-        const active =
-          pathname === item.href ||
-          (item.href !== "/dashboard" && pathname.startsWith(item.href));
-        return (
-          <Button
-            asChild
-            className={cn(
-              "h-10 justify-start px-3 text-sidebar-foreground/70",
-              active &&
-                "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent",
-            )}
-            key={item.href}
-            onClick={onNavigate}
-            variant="ghost"
-          >
-            <Link href={item.href}>
-              <item.icon />
-              {item.label}
-            </Link>
-          </Button>
-        );
-        })}
+      {navigation.slice(0, 3).map((item) => renderNavigationItem(item))}
+      {renderGroup({
+        active: workActive,
+        icon: BriefcaseBusiness,
+        items: visibleWorkNavigation,
+        label: "Work",
+        open: workOpen,
+        setOpen: setWorkOpen,
+      })}
+      {renderGroup({
+        active: clientsActive,
+        icon: Building2,
+        items: clientNavigation,
+        label: "Clients",
+        open: clientsOpen,
+        setOpen: setClientsOpen,
+      })}
+      {canCommercialRead
+        ? renderGroup({
+            active: commercialActive,
+            icon: ReceiptText,
+            items: commercialNavigation,
+            label: "Commercial",
+            open: commercialOpen,
+            setOpen: setCommercialOpen,
+          })
+        : null}
+      {navigation.slice(3).map((item) => renderNavigationItem(item))}
+      {renderGroup({
+        active: moreActive,
+        icon: Menu,
+        items: visibleMoreNavigation,
+        label: "More",
+        open: moreOpen,
+        setOpen: setMoreOpen,
+      })}
     </nav>
   );
 }
@@ -123,14 +296,40 @@ export function AppShell({
   user,
   demoMode,
   isAdmin,
+  canCommercialRead,
+  canSupportRead,
 }: {
   children: React.ReactNode;
   user: ShellUser;
   demoMode: boolean;
   isAdmin: boolean;
+  canCommercialRead: boolean;
+  canSupportRead: boolean;
 }) {
   const pathname = usePathname();
   const chatMode = pathname.startsWith("/chat");
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const [inboxCount, setInboxCount] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadCount = () => {
+      void fetch("/api/inbox?count=1", { signal: controller.signal })
+        .then(async (response) => {
+          const result = (await response.json()) as {
+            counts?: { open?: number };
+          };
+          if (response.ok) setInboxCount(result.counts?.open ?? 0);
+        })
+        .catch(() => undefined);
+    };
+    loadCount();
+    window.addEventListener("inbox:changed", loadCount);
+    return () => {
+      controller.abort();
+      window.removeEventListener("inbox:changed", loadCount);
+    };
+  }, [pathname]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -139,14 +338,19 @@ export function AppShell({
           <Brand />
         </div>
         <Separator className="bg-sidebar-border" />
-        <div className="flex-1 px-3 py-5">
-          <Navigation isAdmin={isAdmin} />
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5">
+          <Navigation
+            canCommercialRead={canCommercialRead}
+            canSupportRead={canSupportRead}
+            inboxCount={inboxCount}
+            isAdmin={isAdmin}
+          />
         </div>
         <div className="space-y-3 border-t border-sidebar-border p-4">
           <div className="rounded-xl bg-sidebar-accent/60 p-3">
             <p className="text-xs font-medium">Connected workspace</p>
             <p className="mt-1 text-[11px] leading-4 text-sidebar-foreground/50">
-              Slack and Claude Cowork-ready.
+              Accelo read-only · Supabase operational core.
             </p>
           </div>
           <UserMenu user={user} />
@@ -155,31 +359,36 @@ export function AppShell({
 
       <div className="lg:pl-64">
         <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b bg-background/92 px-4 backdrop-blur sm:px-6">
-          <Sheet>
+          <Sheet
+            onOpenChange={setMobileNavigationOpen}
+            open={mobileNavigationOpen}
+          >
             <SheetTrigger asChild>
               <Button aria-label="Open navigation" className="lg:hidden" size="icon" variant="outline">
                 <Menu />
               </Button>
             </SheetTrigger>
-            <SheetContent className="bg-sidebar text-sidebar-foreground" side="left">
+            <SheetContent
+              className="overflow-y-auto bg-sidebar text-sidebar-foreground"
+              side="left"
+            >
               <SheetHeader className="text-left">
                 <SheetTitle className="text-sidebar-foreground"><Brand /></SheetTitle>
                 <SheetDescription className="sr-only">Workspace navigation</SheetDescription>
               </SheetHeader>
               <div className="px-3">
-                <Navigation isAdmin={isAdmin} />
+                <Navigation
+                  canCommercialRead={canCommercialRead}
+                  canSupportRead={canSupportRead}
+                  inboxCount={inboxCount}
+                  isAdmin={isAdmin}
+                  onNavigate={() => setMobileNavigationOpen(false)}
+                />
               </div>
             </SheetContent>
           </Sheet>
 
-          <div className="relative hidden max-w-md flex-1 sm:block">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              aria-label="Search workspace"
-              className="border-transparent bg-muted/70 pl-9 shadow-none focus-visible:bg-background"
-              placeholder="Search projects, people, or work…"
-            />
-          </div>
+          {!chatMode && <HeaderSearch />}
           <div className="ml-auto flex items-center gap-2">
             {demoMode && <Badge variant="secondary">Demo data</Badge>}
             <div className="lg:hidden">

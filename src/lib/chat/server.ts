@@ -17,6 +17,7 @@ import type {
   WorkspaceConversationPage,
   WorkspaceConversationPageCursor,
 } from "@/lib/chat/types";
+import { getMessageCrossLinks } from "@/lib/cross-links/server";
 import { createClient } from "@/lib/supabase/server";
 
 type Row = Record<string, unknown>;
@@ -141,11 +142,68 @@ export function mapWorkspaceMessage(row: Row): WorkspaceMessage {
     clientNonce: asString(row.client_nonce),
     parentMessageId: asOptionalString(row.parent_message_id),
     createdAt: asString(row.created_at),
+    editedAt: asOptionalString(row.edited_at),
+    deletedAt: asOptionalString(row.deleted_at),
     replyCount: Number(row.reply_count ?? 0),
     lastReplyAt: asOptionalString(row.last_reply_at),
     threadUnreadCount: Number(row.thread_unread_count ?? 0),
     attachments,
+    links: [],
+    signals: [],
   };
+}
+
+async function hydrateMessageLinks(
+  client: SupabaseClient,
+  messages: WorkspaceMessage[],
+) {
+  if (!messages.length) return messages;
+  const messageIds = messages.map((message) => message.id);
+  const [links, metadata, signals] = await Promise.all([
+    getMessageCrossLinks(client, messageIds),
+    client
+      .from("workspace_messages")
+      .select("id,edited_at,deleted_at")
+      .in("id", messageIds),
+    client
+      .from("workspace_message_signals")
+      .select("message_id,profile_id,signal")
+      .in("message_id", messageIds),
+  ]);
+  if (metadata.error) {
+    console.warn("Workspace message metadata hydration failed:", metadata.error);
+  }
+  if (signals.error) {
+    console.warn("Workspace message signal hydration failed:", signals.error);
+  }
+  const metadataById = new Map(
+    (metadata.data ?? []).map((item) => [item.id, item] as const),
+  );
+  const signalsByMessage = new Map<
+    string,
+    Map<WorkspaceMessage["signals"][number]["signal"], string[]>
+  >();
+  for (const item of signals.data ?? []) {
+    const messageSignals =
+      signalsByMessage.get(item.message_id) ??
+      new Map<WorkspaceMessage["signals"][number]["signal"], string[]>();
+    const signal =
+      item.signal as WorkspaceMessage["signals"][number]["signal"];
+    messageSignals.set(signal, [
+      ...(messageSignals.get(signal) ?? []),
+      item.profile_id,
+    ]);
+    signalsByMessage.set(item.message_id, messageSignals);
+  }
+  return messages.map((message) => ({
+    ...message,
+    editedAt: metadataById.get(message.id)?.edited_at ?? message.editedAt,
+    deletedAt: metadataById.get(message.id)?.deleted_at ?? message.deletedAt,
+    links: links.get(message.id) ?? [],
+    signals: [...(signalsByMessage.get(message.id)?.entries() ?? [])].map(
+      ([signal, profileIds]) => ({ signal, profileIds }),
+    ),
+  }));
 }
 
 function mapConversationPage(value: unknown): WorkspaceConversationPage {
@@ -279,7 +337,23 @@ export async function getWorkspaceAdminProfiles(
       "deactivated",
     ) as WorkspaceAdminProfile["status"],
     chatEnabled: row.chat_enabled === true,
+    permissions: mapWorkspacePermissions(row.permissions),
   }));
+}
+
+function mapWorkspacePermissions(value: unknown) {
+  const permissions =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Row)
+      : {};
+  return {
+    commercialRead: permissions["commercial.read"] === true,
+    commercialWrite: permissions["commercial.write"] === true,
+    timeApprove: permissions["time.approve"] === true,
+    pipelineWrite: permissions["pipeline.write"] === true,
+    supportRead: permissions["support.read"] === true,
+    supportWrite: permissions["support.write"] === true,
+  };
 }
 
 export async function getWorkspaceAdminChannels(
@@ -417,6 +491,10 @@ export async function getWorkspaceChatBootstrap({
   const messageRows = Array.isArray(rawMessagePage.messages)
     ? (rawMessagePage.messages as Row[])
     : [];
+  const selectedMessages = await hydrateMessageLinks(
+    context.supabase,
+    messageRows.map(mapWorkspaceMessage).reverse(),
+  );
 
   return {
     currentProfile: mapChatProfile(data.viewer),
@@ -427,7 +505,7 @@ export async function getWorkspaceChatBootstrap({
     selectedConversationId:
       asOptionalString(data.selected_conversation_id),
     selectedMessagePage: {
-      messages: messageRows.map(mapWorkspaceMessage).reverse(),
+      messages: selectedMessages,
       hasMore: rawMessagePage.has_more === true,
     },
     cursor: asString(data.cursor, "0"),
@@ -504,7 +582,10 @@ export async function getWorkspaceMessagePage({
   );
 
   if (error) throw error;
-  const rows = ((data ?? []) as Row[]).map(mapWorkspaceMessage);
+  const rows = await hydrateMessageLinks(
+    context.supabase,
+    ((data ?? []) as Row[]).map(mapWorkspaceMessage),
+  );
   const hasMore = rows.length > 50;
   return {
     messages: forward
@@ -533,6 +614,11 @@ export async function getWorkspaceThreadRoot({
     .is("parent_message_id", null)
     .maybeSingle();
   if (error) throw error;
-  return data ? mapWorkspaceMessage(data as Row) : undefined;
+  if (!data) return undefined;
+  return (
+    await hydrateMessageLinks(context.supabase, [
+      mapWorkspaceMessage(data as Row),
+    ])
+  )[0];
 }
 

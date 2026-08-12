@@ -10,6 +10,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LinkedConversations } from "@/components/cross-links/linked-conversations";
 import type {
   ArchiveFile,
   ArchiveRecord,
@@ -60,6 +61,7 @@ export function ArchiveRecordList({
       {records.map((record) => (
         <Card
           className={cn(record.parentId && "ml-5 border-l-4 sm:ml-10")}
+          id={`archive-record-${record.id}`}
           key={record.id}
         >
           <CardHeader className="gap-3 pb-3">
@@ -91,15 +93,22 @@ export function ArchiveRecordList({
                 dangerouslySetInnerHTML={{ __html: record.sanitizedHtml }}
               />
             ) : (
-              <p className="line-clamp-4 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">
+              <p className="whitespace-pre-wrap break-words text-sm leading-6 text-muted-foreground">
                 {record.plainText || "No text content was included in this record."}
               </p>
             )}
             {showProjectLinks && record.projectId && (
               <Button asChild className="mt-4" size="sm" variant="outline">
-                <Link href={`/archive/${record.projectId}`}>Open project history</Link>
+                <Link href={`/archive/${record.projectId}#archive-record-${record.id}`}>
+                  Open historical record
+                </Link>
               </Button>
             )}
+            <LinkedConversations
+              compact
+              workId={record.id}
+              workType="archive_record"
+            />
           </CardContent>
         </Card>
       ))}

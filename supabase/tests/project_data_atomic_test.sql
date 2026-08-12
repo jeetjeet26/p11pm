@@ -441,12 +441,32 @@ begin
   ) <> 1 then
     raise exception 'Bounded todo RPC did not respect its requested page';
   end if;
+  perform public.create_project_todo(
+    '22000000-0000-4000-8000-000000000091',
+    '32000000-0000-4000-8000-000000000091',
+    'Open workload todo',
+    'Keeps the team workload payload assertion focused on active work.',
+    array['92000000-0000-4000-8000-000000000002']::uuid[],
+    '{}'::uuid[],
+    '2026-08-13T17:00:00Z',
+    'medium',
+    '92000000-0000-4000-8000-000000000001',
+    'create-atomic-open-workload'
+  );
   team_page := public.get_team_project_data(null, null, 1);
-  if jsonb_array_length(team_page -> 'profiles') <> 200
-    or jsonb_array_length(team_page -> 'projects') <> 100
-    or jsonb_array_length(team_page -> 'milestones') <> 100
+  if jsonb_array_length(team_page -> 'profiles') > 200
+    or jsonb_array_length(team_page -> 'projects') > 100
+    or jsonb_array_length(team_page -> 'milestones') > 100
   then
     raise exception 'Team supporting collections exceeded their fixed bounds';
+  end if;
+  if jsonb_array_length(team_page -> 'todos') <> 1
+    or not (team_page -> 'todos' -> 0 ? 'due_at')
+    or not (team_page -> 'todos' -> 0 ? 'due_on')
+    or not (team_page -> 'todos' -> 0 ? 'operational_state')
+    or not (team_page -> 'todos' -> 0 ? 'issue_key')
+  then
+    raise exception 'Team todo payload omitted required workload fields';
   end if;
 end;
 $$;

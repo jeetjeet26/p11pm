@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LoaderCircle, Mail } from "lucide-react";
+import { LoaderCircle, LogIn } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -22,12 +22,14 @@ export function LoginForm({
   const searchParams = useSearchParams();
   const next = safeNextPath(searchParams.get("next"));
   const initialError = searchParams.get("error");
+  const initialNotice = searchParams.get("notice");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState(initialError ?? "");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(initialNotice ?? "");
   const [loading, setLoading] = useState(false);
 
-  async function sendMagicLink(event: React.FormEvent) {
+  async function signIn(event: React.FormEvent) {
     event.preventDefault();
     setLoading(true);
     setError("");
@@ -40,14 +42,48 @@ export function LoginForm({
       return;
     }
 
-    const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
-    const { error: otpError } = await supabase.auth.signInWithOtp({
+    const { error: signInError } = await supabase.auth.signInWithPassword({
       email: email.trim().toLowerCase(),
-      options: { emailRedirectTo: redirectTo, shouldCreateUser: false },
+      password,
     });
 
-    if (otpError) setError(otpError.message);
-    else setNotice("Check your inbox for a secure sign-in link.");
+    if (signInError) {
+      setError("The email or password is incorrect.");
+      setLoading(false);
+      return;
+    }
+
+    router.push(next);
+    router.refresh();
+  }
+
+  async function sendPasswordReset() {
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      setError("Enter your work email first.");
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setNotice("");
+    const supabase = createClient();
+    if (!supabase) {
+      setError("Supabase is not configured yet. Use the demo workspace.");
+      setLoading(false);
+      return;
+    }
+
+    const resetPage = `/reset-password?next=${encodeURIComponent(next)}`;
+    const redirectTo = new URL("/auth/callback", window.location.origin);
+    redirectTo.searchParams.set("next", resetPage);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+      normalizedEmail,
+      { redirectTo: redirectTo.toString() },
+    );
+
+    if (resetError) setError(resetError.message);
+    else setNotice("Check your inbox for a password reset link.");
     setLoading(false);
   }
 
@@ -76,7 +112,7 @@ export function LoginForm({
         </Alert>
       )}
 
-      <form className="space-y-4" onSubmit={sendMagicLink}>
+      <form className="space-y-4" onSubmit={signIn}>
         <div className="space-y-2">
           <Label htmlFor="email">Work email</Label>
           <Input
@@ -89,21 +125,42 @@ export function LoginForm({
             value={email}
           />
         </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-4">
+            <Label htmlFor="password">Password</Label>
+            <button
+              className="text-xs font-medium text-primary hover:underline"
+              disabled={loading || !supabaseConfigured}
+              onClick={sendPasswordReset}
+              type="button"
+            >
+              Forgot password?
+            </button>
+          </div>
+          <Input
+            autoComplete="current-password"
+            id="password"
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            type="password"
+            value={password}
+          />
+        </div>
         <Button
           className="w-full"
           disabled={loading || !supabaseConfigured}
           size="lg"
           type="submit"
         >
-          {loading ? <LoaderCircle className="animate-spin" /> : <Mail />}
-          Email me a secure sign-in link
+          {loading ? <LoaderCircle className="animate-spin" /> : <LogIn />}
+          Sign in
         </Button>
       </form>
 
       <div className="grid gap-2">
         {!supabaseConfigured ? (
           <p className="text-center text-xs text-muted-foreground">
-            Passwordless sign-in is not configured for this environment.
+            Password sign-in is not configured for this environment.
           </p>
         ) : null}
         {demoModeAllowed ? (

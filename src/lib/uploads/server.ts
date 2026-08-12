@@ -4,7 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { supabaseUrl } from "@/lib/supabase/config";
 import {
-  getDirectStorageEndpoint,
+  getSignedStorageEndpoint,
   TUS_CHUNK_SIZE,
   type SignedTusUpload,
   type UploadReservation,
@@ -99,7 +99,7 @@ async function signReservation(
   }
 
   return {
-    endpoint: getDirectStorageEndpoint(supabaseUrl),
+    endpoint: getSignedStorageEndpoint(supabaseUrl),
     token: data.token,
     bucketName: reservation.bucketName,
     objectName: reservation.objectName,
@@ -131,6 +131,40 @@ export async function initiateUpload(
     );
   }
 
+  try {
+    return {
+      reservation,
+      upload: await signReservation(supabase, reservation),
+    };
+  } catch (error) {
+    await supabase.rpc("fail_upload_reservation", {
+      reservation_id: reservation.id,
+      failure_message: "signed_upload_token_failed",
+    });
+    throw error;
+  }
+}
+
+export async function initiateWorkspaceUpload(
+  supabase: SupabaseClient,
+  input: Omit<UploadRpcInput, "targetKind" | "targetId"> & { folderId: string },
+): Promise<UploadSession> {
+  const { data, error } = await supabase.rpc("create_workspace_file_upload", {
+    target_folder_id: input.folderId,
+    upload_file_name: input.fileName,
+    upload_mime_type: input.mimeType ?? null,
+    upload_size_bytes: input.sizeBytes,
+  });
+  if (error) {
+    throw rpcError(error, "Could not create the workspace upload.");
+  }
+  const reservation = asReservation(data);
+  if (!reservation) {
+    throw new UploadServiceError(
+      "The upload reservation response was invalid.",
+      500,
+    );
+  }
   try {
     return {
       reservation,
@@ -223,5 +257,36 @@ export async function finalizeUpload<TResource extends UploadResource>(
     );
   }
 
+  return reservation;
+}
+
+export async function finalizeWorkspaceUpload<
+  TResource extends UploadResource = UploadResource,
+>(supabase: SupabaseClient, reservationId: string) {
+  const { data, error } = await supabase.rpc("finalize_workspace_file_upload", {
+    reservation_id: reservationId,
+  });
+  if (error) {
+    throw rpcError(error, "Could not finalize the workspace upload.");
+  }
+  const reservation = asReservation<TResource>(data);
+  if (!reservation || reservation.targetKind !== "workspace_file") {
+    return undefined;
+  }
+  if (reservation.status === "failed") {
+    throw new UploadServiceError(
+      reservation.failureReason ?? "Upload validation failed.",
+      422,
+    );
+  }
+  if (
+    reservation.status !== "finalized" ||
+    !reservation.resource
+  ) {
+    throw new UploadServiceError(
+      "The storage upload is not complete yet.",
+      409,
+    );
+  }
   return reservation;
 }

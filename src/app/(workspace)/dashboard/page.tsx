@@ -1,9 +1,13 @@
 import {
   AlertTriangle,
   ArrowRight,
+  Banknote,
+  Building2,
   CheckCircle2,
   Clock3,
   FolderKanban,
+  Gauge,
+  Repeat2,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -13,7 +17,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { getViewer } from "@/lib/auth/viewer";
+import { getCommercialSnapshot } from "@/lib/commercial-reports";
 import { getDashboardData } from "@/lib/data";
+import { getDeliveryReport } from "@/lib/reports";
 
 export const metadata = { title: "Home" };
 
@@ -27,9 +33,11 @@ async function getGreetingName(): Promise<string> {
 }
 
 export default async function DashboardPage() {
-  const [data, greetingName] = await Promise.all([
+  const [data, greetingName, delivery, commercial] = await Promise.all([
     getDashboardData(),
     getGreetingName(),
+    getDeliveryReport(),
+    getCommercialSnapshot(),
   ]);
   const now = new Date();
   const localHour = Number(
@@ -48,6 +56,12 @@ export default async function DashboardPage() {
     weekday: "long",
   }).format(now);
   const activeProjects = data.projects;
+  const currentIssueCount = delivery.available
+    ? delivery.projectHealth.reduce(
+        (total, project) => total + project.active,
+        0,
+      )
+    : data.metrics.openTodoCount;
 
   return (
     <div className="space-y-8">
@@ -78,24 +92,40 @@ export default async function DashboardPage() {
             icon: FolderKanban,
           },
           {
-            label: "Open assignments",
-            value: data.metrics.openTodoCount,
-            detail: "Across the whole team",
+            label: "Current issues",
+            value: currentIssueCount,
+            detail: delivery.available
+              ? "Active work; triage/history excluded"
+              : "Across the whole team",
             icon: CheckCircle2,
           },
           {
             label: "Overdue",
-            value: data.metrics.overdueTodoCount,
-            detail: data.metrics.overdueTodoCount ? "Needs follow-up" : "Everything on track",
+            value: delivery.available
+              ? delivery.overdueCount
+              : data.metrics.overdueTodoCount,
+            detail: (delivery.available
+              ? delivery.overdueCount
+              : data.metrics.overdueTodoCount)
+              ? "Needs follow-up"
+              : "Everything on track",
             icon: Clock3,
-            alert: data.metrics.overdueTodoCount > 0,
+            alert:
+              (delivery.available
+                ? delivery.overdueCount
+                : data.metrics.overdueTodoCount) > 0,
           },
           {
             label: "Blocked",
-            value: data.metrics.blockedTodoCount,
+            value: delivery.available
+              ? delivery.blockedCount
+              : data.metrics.blockedTodoCount,
             detail: "Waiting on decisions or access",
             icon: AlertTriangle,
-            alert: data.metrics.blockedTodoCount > 0,
+            alert:
+              (delivery.available
+                ? delivery.blockedCount
+                : data.metrics.blockedTodoCount) > 0,
           },
         ].map((metric) => (
           <Card key={metric.label}>
@@ -111,6 +141,78 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
         ))}
+      </section>
+
+      <section>
+        <div className="mb-4 flex items-end justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight">
+              Agency operations
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Client, retainer, billing, and cash signals.
+            </p>
+          </div>
+          <Button asChild size="sm" variant="ghost">
+            <Link href="/billing">Open billing</Link>
+          </Button>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {[
+            {
+              label: "Active clients",
+              value: commercial.activeClients.toLocaleString(),
+              detail: "Current client relationships",
+              icon: Building2,
+            },
+            {
+              label: "Active retainers",
+              value: commercial.activeRetainers.toLocaleString(),
+              detail: `${commercial.retainerBurnPercent}% allowance burn`,
+              icon: Repeat2,
+            },
+            {
+              label: "Approved unbilled",
+              value: formatMoney(commercial.unbilledValue),
+              detail: "Ready for invoice preparation",
+              icon: Gauge,
+            },
+            {
+              label: "Outstanding",
+              value: formatMoney(commercial.outstandingBalance),
+              detail: "Open receivables",
+              icon: Banknote,
+            },
+            {
+              label: "Cash this month",
+              value: formatMoney(commercial.cashCollectedThisMonth),
+              detail: "Recorded payments",
+              icon: Banknote,
+            },
+            {
+              label: "Gross margin",
+              value:
+                commercial.grossMarginPercent === undefined
+                  ? "—"
+                  : `${commercial.grossMarginPercent}%`,
+              detail: "Logged labor at snapshot rates",
+              icon: Gauge,
+            },
+          ].map((metric) => (
+            <Card key={metric.label}>
+              <CardContent className="flex items-start justify-between p-5">
+                <div>
+                  <p className="text-sm text-muted-foreground">{metric.label}</p>
+                  <p className="mt-2 text-2xl font-semibold">{metric.value}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {metric.detail}
+                  </p>
+                </div>
+                <metric.icon className="size-4 text-primary" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -151,7 +253,16 @@ export default async function DashboardPage() {
                     <p>
                       <span className="font-medium">{event.actorName}</span>{" "}
                       <span className="text-muted-foreground">{event.verb}</span>{" "}
-                      <span className="font-medium">{event.object}</span>
+                      {activityHref(event) ? (
+                        <Link
+                          className="font-medium text-primary hover:underline"
+                          href={activityHref(event)!}
+                        >
+                          {event.object}
+                        </Link>
+                      ) : (
+                        <span className="font-medium">{event.object}</span>
+                      )}
                     </p>
                     <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                       <Badge className="max-w-36 truncate" variant="secondary">
@@ -168,4 +279,23 @@ export default async function DashboardPage() {
       </section>
     </div>
   );
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function activityHref(event: {
+  projectId: string;
+  entityType?: string;
+  entityId?: string;
+}) {
+  return event.entityId &&
+    (event.entityType === "todo" || event.entityType === "todos")
+    ? `/projects/${event.projectId}/issues/${event.entityId}`
+    : undefined;
 }

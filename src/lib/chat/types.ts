@@ -1,3 +1,5 @@
+import type { WorkspaceCrossLink } from "@/lib/cross-links/types";
+
 export type WorkspaceConversationKind = "channel" | "dm";
 export type WorkspaceConversationVisibility = "public" | "private";
 export type WorkspaceConversationMemberRole = "owner" | "member";
@@ -58,6 +60,14 @@ export interface WorkspaceAdminProfile {
   role: WorkspaceProfileRole;
   status: WorkspaceProfileStatus;
   chatEnabled: boolean;
+  permissions: {
+    commercialRead: boolean;
+    commercialWrite: boolean;
+    timeApprove: boolean;
+    pipelineWrite: boolean;
+    supportRead: boolean;
+    supportWrite: boolean;
+  };
 }
 
 export interface WorkspaceAdminChannel {
@@ -77,10 +87,17 @@ export interface WorkspaceMessage {
   clientNonce: string;
   parentMessageId?: string;
   createdAt: string;
+  editedAt?: string;
+  deletedAt?: string;
   replyCount: number;
   lastReplyAt?: string;
   threadUnreadCount: number;
   attachments: WorkspaceAttachment[];
+  links: WorkspaceCrossLink[];
+  signals: Array<{
+    signal: "acknowledged" | "approved" | "needs_changes" | "blocked" | "done";
+    profileIds: string[];
+  }>;
 }
 
 export interface ChatShellBootstrap {
